@@ -3,7 +3,7 @@ download_db1b.py
 ------------------
 
 This script automates the retrieval of quarterly market level data from the
-U.S. Department of Transportation’s Origin and Destination Survey (DB1B).
+U.S. Department of Transportation's Origin and Destination Survey (DB1B).
 
 The DB1B survey contains three relational tables (Coupon, Ticket and
 Market) and is distributed as quarterly ZIP archives.  Each archive
@@ -15,25 +15,15 @@ distances.  This script focuses on the Market table.
 
 The goal of this script is to download all DB1B Market files for a
 specified range of years and quarters, extract a subset of variables and
-save them to disk.  The default variable list matches the requirements
-specified in the user’s project:
+save them to disk, same with ancillary data.  
 
-    "OriginCityMarketID",
-    "DestCityMarketID",
-    "OriginAirportID",
-    "DestAirportID",
-    "Passengers",
-    "MktFare",
-    "MktDistance",
-    "NonStopMiles",
-    "MktCoupons",
-    "TkCarrier",
-    "Year",
-    "Quarter",
+The default variable list for the DB1B matches the requirements
+specified in the user's project: 
+
+            - List of required columns: `req_cols' 
 
 The script uses the public PREZIP directory on the TranStats web site to
-download each quarterly file.  File names follow a predictable pattern
-that depends on the table type, year and quarter.  For example, the
+download each quarterly file. For example, the
 market file for the first quarter of 2019 is called
 ``Origin_and_Destination_Survey_DB1BMarket_2019_1.zip`` and is located at
 
@@ -41,15 +31,11 @@ market file for the first quarter of 2019 is called
 
 If the PREZIP URL fails (because BTS occasionally serves content from
 ``www.transtats.bts.gov``), the script attempts the secondary URL
-``https://www.transtats.bts.gov/PREZIP/<file>``.  Users behind strict
-firewalls or proxies may need to configure the `requests` session
-accordingly (for example by setting the ``HTTP_PROXY`` or ``HTTPS_PROXY``
-environment variables).
+``https://www.transtats.bts.gov/PREZIP/<file>``.
 
-The script also demonstrates how to join the DB1B market data with
-ancillary tables such as airport populations, vacation schedules, carrier
-lookup codes and CPI data.  Those datasets must be supplied in the
-project’s data directory; placeholders and stub functions are provided
+Ancillary tables such as airport populations, vacation schedules, carrier
+lookup codes and CPI data must be supplied in the
+project's data directory; placeholders and stub functions are provided
 below.
 
 Usage:
@@ -59,23 +45,23 @@ Usage:
         --end-year 2019 \
         --quarters 1 2 3 4 \
         --out-dir ./db1b_market \
-        --data-dir ./data
+        --data-dir ./data \
+        --raw-dir ./data/raw \
+        --proc-dir ./data/processed \
+        --skip-market False \
+        --out-proc-dir ./processed_db1b_market
+
+    - skip-market is a flag to skip the market data processing if you already have the files downloaded.
+        It jumps to loading the ancillary data.
 
 The script will create the output directory if it does not already
 exist and will write one CSV file per quarter.
 
 Limitations:
 
-  * This script requires external network access to the BTS TranStats
-    servers.  If your environment blocks connections or requires SSL
-    certificates, you may need to run the script from a different
-    location.
-  * The DB1B files are large (tens of megabytes per quarter) and
-    downloading many years of data can take considerable time and disk
-    space.  Ensure you have sufficient storage available.
-  * BTS occasionally changes the naming convention or location of the
-    PREZIP files.  If downloads fail, check the TranStats website for
-    updated file names.
+  * Requires external network access to BTS TranStats servers.
+  * DB1B files are large (tens of MB per quarter) and require sufficient storage.
+  * BTS may change file naming conventions or locations occasionally.
 
 Author: Giselle Labrador-Badia
 Date: 2025-08-16
@@ -92,7 +78,7 @@ import pandas as pd  # type: ignore
 import requests
 
 # from project
-from data_utils import extract_columns_from_zip, get_cpi_index, load_api_keys
+from data_utils import extract_columns_from_zip, get_cpi_index, load_api_keys, _load_table_any
  
 
 req_cols = [
@@ -106,6 +92,9 @@ req_cols = [
     "NonStopMiles",
     "MktCoupons",
     "TkCarrier",
+    "TkCarrierChange",
+    "OpCarrierChange",   # optional
+    "RPCarrier",         # optional
     "Year",
     "Quarter",
 ]
@@ -270,18 +259,12 @@ def load_ancillary_data(data_dir: str) -> dict:
             path = os.path.join(data_dir, fname)
             if os.path.exists(path):
                 try:
-                    if fname.endswith('.dta'):
-                        result[key] = pd.read_stata(path)
-                    elif fname.endswith('.csv'):
-                        result[key] = pd.read_csv(path)
-                    elif fname.endswith('.R'):
-                        # Read R data file as text and parse if it's in a simple format
-                        with open(path, 'r') as f:
-                            content = f.read()
-                        print(f"\033[33m Warning: R file {path} found but requires manual parsing.\033[0m")
-                        print(f"    - File content preview: {content[:200]}...")
-                        result[key] = pd.DataFrame()  # Empty for now
-                    
+
+                    df = _load_table_any(path)
+                    if not isinstance(df, pd.DataFrame):
+                        raise ValueError("Loaded object is not a DataFrame")
+                    result[key] = df
+
                     if not result[key].empty:
                         print(f"\033[32m - Loaded {path}\033[0m")
                         print("     - Columns:", ", ".join(result[key].columns))
@@ -297,6 +280,12 @@ def load_ancillary_data(data_dir: str) -> dict:
         if not loaded:
             print(f"\033[33m Warning: No readable file found for {key} dataset; will be empty.\033[0m")
             result[key] = pd.DataFrame()
+
+        # * save in csv format for easier future loading in processed dir (instead of raw)
+        if not result[key].empty:
+            csv_path = os.path.join(data_dir.replace("raw", "processed"), f"{key}.csv")
+            result[key].to_csv(csv_path, index=False)
+            print(f"\033[35m - Saved {key} to {csv_path}\033[0m")
 
     # * Load CPI data and compute annual index relative to 2008
 
@@ -316,10 +305,9 @@ def load_ancillary_data(data_dir: str) -> dict:
     if os.path.exists(cpi_path):
         cpi = pd.read_csv(cpi_path)
         # Ensure the dataset has 'year' and 'value' columns
-        # If the dataset uses a different structure, adjust accordingly.
-        if "DATE" in cpi.columns and "VALUE" in cpi.columns:
+        if "year" in cpi.columns and "value" in cpi.columns:
             result["cpi_index"] = pd.Series(cpi.set_index("year")["value"], name="cpi_index")
-            print(f"Loaded CPI index (base 2008) from {cpi_path}")
+            print(f"\033[32m - Loaded CPI index (base 2008) from {cpi_path}\033[0m")
         else:
             print(f"\033[33m Warning: Unexpected columns in {cpi_path}; skipping CPI computation.\033[0m")
             result["cpi_index"] = pd.Series(dtype=float)
@@ -359,19 +347,31 @@ def main(args: Optional[List[str]] = None) -> None:
         "--out-dir",
         type=str,
         default="../data/raw/db1b_market",
-        help="Directory to store downloaded files",
+        help="Directory to store downloaded files from TranStats",
     )
     parser.add_argument(
     "--out-proc-dir",
     type=str,
     default="../data/processed/db1b_market",
-    help="Directory to store processed files",
+    help="Directory to store processed files from TranStats",
     )
     parser.add_argument(
         "--data-dir",
         type=str,
         default="../data/raw/other",
         help="Directory containing ancillary datasets (lookup tables, etc.)",
+    )
+    parser.add_argument(
+        "--raw-dir",
+        type=str,
+        default="../data/raw",
+        help="Directory containing raw datasets"
+    )
+    parser.add_argument(
+        "--proc-dir",
+        type=str,
+        default="../data/procesessed",
+        help="Directory containing raw datasets"
     )
     parser.add_argument(
         "--skip-market",

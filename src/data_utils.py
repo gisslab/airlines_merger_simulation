@@ -23,6 +23,9 @@ from typing import Iterable, List, Optional, Union
 import json
 from pathlib import Path
 
+import pyreadr
+import gzip
+
 
 def load_api_keys(path: Union[str, None] = None) -> dict:
     """
@@ -154,4 +157,87 @@ def get_cpi_index(base_year: int = 2008,
     print(f"\033[32m - CPI data successfully fetched and indexed to base year {base_year}.\033[0m")
     return cpi_index
 
+
+
+def _is_gzip(path: str) -> bool:
+    """Return True if file starts with GZIP magic bytes (1F 8B)."""
+    with open(path, 'rb') as f:
+        head = f.read(2)
+    return head == b'\x1f\x8b'
+
+
+def _load_r_file(path: str) -> pd.DataFrame:
+    """
+    Load an R data file. Supports .rds, .RDS, .RData/.rda, and .R (if actually an R binary).\
+    
+    Returns:
+    --------
+        DataFrame (first data.frame found) or raises a helpful Exception.
+    """
+
+    # Try reading as an R serialized object (.rds / .RData)
+    try:
+        result = pyreadr.read_r(path)  # dict-like: {object_name: pandas.DataFrame or numpy objects}
+        # Prefer the first DataFrame-like object
+        for name, obj in result.items():
+            if isinstance(obj, pd.DataFrame):
+                print(f" - Found R object '{name}' with shape {obj.shape}")
+                return obj
+        # If nothing is a DataFrame, try to coerce the first object
+        if result:
+            name, obj = next(iter(result.items()))
+            try:
+                df = pd.DataFrame(obj)
+                print(f" - Coerced R object '{name}' to DataFrame with shape {df.shape}")
+                return df
+            except Exception:
+                pass
+        raise ValueError("R file loaded but no DataFrame-like object found.")
+    except Exception as e:
+        # If it fails, try a gzipped CSV fallback (sometimes mislabeled)
+        if _is_gzip(path):
+            try:
+                with gzip.open(path, 'rt', encoding='utf-8') as fh:
+                    # try comma; if that fails it may be pipe- or tab-delimited
+                    try:
+                        df = pd.read_csv(fh)
+                    except Exception:
+                        fh.seek(0)
+                        df = pd.read_csv(fh, sep='|')
+                print("   - Loaded as gzipped text (CSV/pipe) fallback")
+                return df
+            except Exception as e2:
+                raise ValueError(f"Failed reading as R object and gzipped text. R error: {e}; gzip error: {e2}")
+        # Otherwise, re-raise the original error
+        raise
+
+
+def _load_table_any(path: str) -> pd.DataFrame:
+    """
+    Generic table loader based on extension/content.
+    """
+    ext = os.path.splitext(path)[1].lower()
+    if ext in ('.csv', '.tsv'):
+        sep = ',' if ext == '.csv' else '\t'
+        if _is_gzip(path):
+            with gzip.open(path, 'rt', encoding='utf-8') as fh:
+                return pd.read_csv(fh, sep=sep)
+        return pd.read_csv(path, sep=sep)
+    if ext == '.dta':
+        return pd.read_stata(path)
+    if ext in ('.rds', '.rdata', '.rda') or ext == '.r':
+        return _load_r_file(path)
+
+    # Try CSV as a last resort
+    try:
+        return pd.read_csv(path)
+    except Exception:
+        pass
+    # Try JSON array fallback
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            js = json.load(f)
+        return pd.DataFrame(js)
+    except Exception as e:
+        raise ValueError(f"Unsupported file format or unreadable content: {path}. Error: {e}")
 
