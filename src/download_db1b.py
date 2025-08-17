@@ -18,18 +18,18 @@ specified range of years and quarters, extract a subset of variables and
 save them to disk.  The default variable list matches the requirements
 specified in the user’s project:
 
-    - ORIGIN_CITY_MARKET_ID
-    - DEST_CITY_MARKET_ID
-    - ORIGIN_AIRPORT_ID
-    - DEST_AIRPORT_ID
-    - PASSENGERS
-    - MARKET_FARE
-    - MARKET_DISTANCE
-    - NONSTOP_MILES
-    - COUPONS
-    - TK_CARRIER
-    - YEAR
-    - QUARTER
+    "OriginCityMarketID",
+    "DestCityMarketID",
+    "OriginAirportID",
+    "DestAirportID",
+    "Passengers",
+    "MktFare",
+    "MktDistance",
+    "NonStopMiles",
+    "MktCoupons",
+    "TkCarrier",
+    "Year",
+    "Quarter",
 
 The script uses the public PREZIP directory on the TranStats web site to
 download each quarterly file.  File names follow a predictable pattern
@@ -91,21 +91,9 @@ from typing import Iterable, List, Optional
 import pandas as pd  # type: ignore
 import requests
 
-
-req_cols = [
-    "ORIGIN_CITY_MARKET_ID",
-    "DEST_CITY_MARKET_ID",
-    "ORIGIN_AIRPORT_ID",
-    "DEST_AIRPORT_ID",
-    "PASSENGERS",
-    "MARKET_FARE",
-    "MARKET_DISTANCE",
-    "NONSTOP_MILES",
-    "COUPONS",
-    "TK_CARRIER",
-    "YEAR",
-    "QUARTER",
-]
+# from project
+from data_utils import extract_columns_from_zip, get_cpi_index, load_api_keys
+ 
 
 req_cols = [
     "OriginCityMarketID",
@@ -121,7 +109,6 @@ req_cols = [
     "Year",
     "Quarter",
 ]
-
 
 
 def build_db1b_url(year: int, quarter: int) -> List[str]:
@@ -198,51 +185,6 @@ def download_file(urls: Iterable[str], dest: str, session: Optional[requests.Ses
     raise RuntimeError(f"All download attempts failed for {urls}")
 
 
-def extract_columns_from_zip(zip_path: str, required_columns: List[str]) -> pd.DataFrame:
-    """Extract and return only the specified columns from a DB1B market ZIP.
-
-    The DB1B market ZIP file contains a single delimited text file
-    (usually with a ``.csv`` or ``.dat`` extension).  This function
-    reads the file directly from the ZIP archive into a pandas DataFrame
-    and returns only the columns listed in ``required_columns``.  Column
-    names are treated case‐insensitively.
-
-    Parameters
-    ----------
-    zip_path : str
-        Path to the downloaded ZIP archive.
-    required_columns : list of str
-        Columns to extract from the file.  The function will raise a
-        ``KeyError`` if any of these columns are not found.
-
-    Returns
-    -------
-    pandas.DataFrame
-        DataFrame containing only the requested columns.
-    """
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        # Assume the first non‑directory member is the data file
-        data_members = [m for m in zf.namelist() if not m.endswith("/")]
-        if not data_members:
-            raise RuntimeError(f"No files found inside {zip_path}")
-        data_file = data_members[0]
-        with zf.open(data_file) as fh:
-            # Try comma delimiter first; if that fails, fall back to pipe
-            try:
-                df = pd.read_csv(fh, low_memory=False)
-            except Exception:
-                fh.seek(0)
-                df = pd.read_csv(fh, delimiter="|", low_memory=False)
-
-    # Normalize column names to upper case for matching
-    col_map = {c.upper(): c for c in df.columns}
-    missing = [col for col in required_columns if col.upper() not in col_map]
-    if missing:
-        raise KeyError(f"Missing columns in {zip_path}: {', '.join(missing)}")
-    # Select and return in original casing
-    selected = {col: df[col_map[col.upper()]] for col in required_columns}
-    return pd.DataFrame(selected)
-
 
 def process_quarter(year: int, quarter: int, required_columns: List[str], out_dir: str,
                     out_proc_dir: str = "../data/processed/db1b_market",
@@ -310,54 +252,79 @@ def load_ancillary_data(data_dir: str) -> dict:
         Dictionary of pandas DataFrames or Series.
     """
     result: dict = {}
-    # Load city market lookup
-    city_file = os.path.join(data_dir, "L_CITY_MARKET_ID.csv")
-    if os.path.exists(city_file):
-        result["city_market_lookup"] = pd.read_csv(city_file)
-        print(f"Loaded {city_file}")
-    else:
-        print(f"\033[33mWarning: {city_file} not found; city market lookup will be empty.\033[0m")
-        result["city_market_lookup"] = pd.DataFrame()
-    # Load population data
-    pop_file = os.path.join(data_dir, "populations.csv")
-    if os.path.exists(pop_file):
-        result["population"] = pd.read_csv(pop_file)
-        print(f"Loaded {pop_file}")
-    else:
-        print(f"\033[33mWarning: {pop_file} not found; population data will be empty.\033[0m")
-        result["population"] = pd.DataFrame()
-    # Load Stata datasets using pandas.read_stata
-    stata_files = [
-        ("vacations", "vacations.dta"),
-        ("lookup_and_hub_r", "lookup_and_hub_r.dta"),
-        ("slot_controlled", "slot_controlled.dta"),
+
+    # * Load all datasets with multiple format support
+    datasets = [
+        ("city_market_lookup", ["L_CITY_MARKET_ID.csv"]),
+        ("population", ["populations.csv"]),
+        ("vacations", ["vacations.R"]),
+        ("lookup_and_hub_r", ["lookup_and_hub_r.R"]),
+        ("slot_controlled", ["slot_controlled.R"]),
+        ("t_master_cord", ["T_MASTER_CORD.csv"])
     ]
-    for key, fname in stata_files:
-        path = os.path.join(data_dir, fname)
-        if os.path.exists(path):
-            result[key] = pd.read_stata(path)
-            print(f"Loaded {path}")
-        else:
-            print(f"\033[33mWarning: {path} not found; {key} dataset will be empty.\033[0m")
+    
+    for key, filenames in datasets:
+        loaded = False
+        for fname in filenames:
+            print(f"* Trying to load {key} from {fname}...")
+            path = os.path.join(data_dir, fname)
+            if os.path.exists(path):
+                try:
+                    if fname.endswith('.dta'):
+                        result[key] = pd.read_stata(path)
+                    elif fname.endswith('.csv'):
+                        result[key] = pd.read_csv(path)
+                    elif fname.endswith('.R'):
+                        # Read R data file as text and parse if it's in a simple format
+                        with open(path, 'r') as f:
+                            content = f.read()
+                        print(f"\033[33m Warning: R file {path} found but requires manual parsing.\033[0m")
+                        print(f"    - File content preview: {content[:200]}...")
+                        result[key] = pd.DataFrame()  # Empty for now
+                    
+                    if not result[key].empty:
+                        print(f"\033[32m - Loaded {path}\033[0m")
+                        print("     - Columns:", ", ".join(result[key].columns))
+                        print(f"     - Shape: {result[key].shape}")
+                    else:
+                        print(f"\033[33m - Loaded {path} (empty dataset)\033[0m")
+                    loaded = True
+                    break
+                except Exception as e:
+                    print(f"\033[31mError loading {path}: {e}\033[0m")
+                    continue
+        
+        if not loaded:
+            print(f"\033[33m Warning: No readable file found for {key} dataset; will be empty.\033[0m")
             result[key] = pd.DataFrame()
-    # Load CPI data and compute annual index relative to 2008
-    cpi_path = os.path.join(data_dir, "CPIAUCSL.dta")
+
+    # * Load CPI data and compute annual index relative to 2008
+
+    cpi_path = os.path.join(data_dir, "cpi_index.csv")
+
+    # if it dos't exist download it from FRED using the get_cpi_index function
+    if not os.path.exists(cpi_path):
+        print(f"\033[33m CPI data not found at {cpi_path}; downloading from FRED...\033[0m")
+        try:
+            cpi = get_cpi_index(base_year=2008, api_key=load_api_keys()["fred_key"], 
+                                output_path=cpi_path)
+            print(f"\033[32m Downloaded CPI data to {cpi_path}\033[0m")
+        except Exception as e:
+            print(f"\033[31m Failed to download CPI data: {e}\033[0m")
+            result["cpi_index"] = pd.Series(dtype=float)
+            return result
     if os.path.exists(cpi_path):
-        cpi = pd.read_stata(cpi_path)
+        cpi = pd.read_csv(cpi_path)
         # Ensure the dataset has 'year' and 'value' columns
         # If the dataset uses a different structure, adjust accordingly.
         if "DATE" in cpi.columns and "VALUE" in cpi.columns:
-            cpi["YEAR"] = pd.to_datetime(cpi["DATE"]).dt.year
-            annual_mean = cpi.groupby("YEAR")["VALUE"].mean()
-            base = annual_mean.loc[2008]
-            index = (annual_mean / base) * 100
-            result["cpi_index"] = index
-            print(f"Computed CPI index relative to 2008 from {cpi_path}")
+            result["cpi_index"] = pd.Series(cpi.set_index("year")["value"], name="cpi_index")
+            print(f"Loaded CPI index (base 2008) from {cpi_path}")
         else:
-            print(f"\033[33mWarning: Unexpected columns in {cpi_path}; skipping CPI computation.\033[0m")
+            print(f"\033[33m Warning: Unexpected columns in {cpi_path}; skipping CPI computation.\033[0m")
             result["cpi_index"] = pd.Series(dtype=float)
     else:
-        print(f"\033[33mWarning: {cpi_path} not found; CPI index will be empty.\033[0m")
+        print(f"\033[33m Warning: {cpi_path} not found; CPI index will be empty.\033[0m")
         result["cpi_index"] = pd.Series(dtype=float)
     return result
 
@@ -403,37 +370,50 @@ def main(args: Optional[List[str]] = None) -> None:
     parser.add_argument(
         "--data-dir",
         type=str,
-        default="../data/raw/",
+        default="../data/raw/other",
         help="Directory containing ancillary datasets (lookup tables, etc.)",
+    )
+    parser.add_argument(
+        "--skip-market",
+        type=str,
+        default="False",
+        help="Skip market data processing",
     )
     parsed = parser.parse_args(args)
     years = range(parsed.start_year, parsed.end_year + 1)
+
+    print("\033[1;34m \n-------------------  Starting DB1B market data download and processing... ----------------- \033[0m")
 
     # Create the output directory
     os.makedirs(parsed.out_dir, exist_ok=True)
     os.makedirs(parsed.out_proc_dir, exist_ok=True)
 
-    # Reuse a session for all downloads to improve performance
-    session = requests.Session()
-    for year in years:
-        for quarter in parsed.quarters:
-            try:
-                print(f"\033[1;34m *********** Processing {year} Q{quarter}... ***********\033[0m")
-                process_quarter(year, quarter, req_cols, parsed.out_dir, parsed.out_proc_dir, session=session)
-            except Exception as ex:
-                print(f"\033[31mFailed to process {year} Q{quarter}: {ex}\033[0m")
-    # Load ancillary datasets (optional)
+    if parsed.skip_market.lower() != "true":
+        # Reuse a session for all downloads to improve performance
+        session = requests.Session()
+        for year in years:
+            for quarter in parsed.quarters:
+                try:
+                    print(f"\033[1;34m *********** Processing {year} Q{quarter}... ***********\033[0m")
+                    process_quarter(year, quarter, req_cols, parsed.out_dir, parsed.out_proc_dir, session=session)
+                except Exception as ex:
+                    print(f"\033[31mFailed to process {year} Q{quarter}: {ex}\033[0m")
+    else:
+        print("\033[33mSkipping market data processing as per --skip-market flag.\033[0m")
+
+    # * Load ancillary datasets 
     ancillary = load_ancillary_data(parsed.data_dir)
-    # At this point you could merge the DB1B market files with the ancillary
+
+    # At this point I could merge the DB1B market files with the ancillary -> do this on Stata
     # datasets using pandas.  For example:
     #
     # for csv_path in sorted(glob.glob(os.path.join(parsed.out_dir, 'db1b_market_*.csv'))):
     #     df = pd.read_csv(csv_path)
-    #     df = df.merge(ancillary['city_market_lookup'], left_on='ORIGIN_CITY_MARKET_ID', right_on='CITY_MARKET_ID', how='left')
+    #     df = df.merge(ancillary['city_market_lookup'], left_on='OriginCityMarketID', right_on='CITY_MARKET_ID', how='left')
     #     # Additional merges and transformations here
     #     df.to_csv(csv_path.replace('.csv', '_enriched.csv'), index=False)
     #
-    print("Processing complete.")
+    print("\033[1;34mProcessing complete. -------------------------------------------------------------------------- \033[0m")
 
 
 if __name__ == "__main__":
