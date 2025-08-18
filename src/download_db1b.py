@@ -51,7 +51,7 @@ Usage:
         --skip-market False \
         --out-proc-dir ./processed_db1b_market
 
-    - skip-market is a flag to skip the market data processing if you already have the files downloaded.
+    - skip-market is a flag to skip the market data processing if already have the files downloaded.
         It jumps to loading the ancillary data.
 
 The script will create the output directory if it does not already
