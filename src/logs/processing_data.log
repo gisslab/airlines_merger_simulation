@@ -1,0 +1,3202 @@
+-------------------------------------------------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  /Users/gisellelab/Work/airlines_merger_simulation/src/logs/processing_data.log
+  log type:  text
+ opened on:  18 Aug 2025, 12:14:10
+
+. 
+. 
+. // ---------------------- PARAMETERS -------------------------------------------
+. global YEARS   "2005/2019"
+
+. global QUARTERS "1 2 3 4"
+
+. global TYPE     "Market"   // DB1B “Market”
+
+. 
+. 
+. di as yellow "--------------------------------------------------------------------------------------------------"
+--------------------------------------------------------------------------------------------------
+
+. di as yellow "----------------------------------- Running preprocessing_data.do --------------------------------"
+----------------------------------- Running preprocessing_data.do --------------------------------
+
+. di as yellow "--------------------------------------------------------------------------------------------------"
+--------------------------------------------------------------------------------------------------
+
+. 
+. // ---------------------- LOAD AUXILIARY TABLES --------------------------------
+. di as yellow "------------------------------------ Loading auxiliary tables ------------------------------------"
+------------------------------------ Loading auxiliary tables ------------------------------------
+
+. 
+. // * City market lookup
+. import delimited using "${PROC_OTHER}city_market_lookup.csv", varnames(1) clear stringcols(_all)
+(encoding automatically selected: ISO-8859-1)
+(2 vars, 5,987 obs)
+
+. tempfile cities
+
+. save `cities'
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.000001 saved as .dta format
+
+. 
+. // * Vacations (city-level flags) (only in the U.S.)
+. import delimited using "${PROC_OTHER}vacations.csv", varnames(1) clear stringcols(_all)
+(encoding automatically selected: ISO-8859-1)
+(2 vars, 243 obs)
+
+. rename origin_cities description
+
+. destring vacation_spot, replace force
+vacation_spot: all characters numeric; replaced as byte
+
+. tempfile vacations
+
+. save `vacations'
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.000002 saved as .dta format
+
+. 
+. // * City lookup + vacations
+. use `cities', clear
+
+. merge 1:1 description using `vacations', nogenerate
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                         5,816
+        from master                     5,780  
+        from using                         36  
+
+    Matched                               207  
+    -----------------------------------------
+
+. keep code vacation_spot
+
+. 
+. // # make int vacation_spot if float
+. replace vacation_spot = 0 if vacation_spot==.
+(5,780 real changes made)
+
+. // code to long for merger
+. destring code, replace
+code: all characters numeric; replaced as long
+(36 missing values generated)
+
+. // Remove duplicates to ensure unique merge key
+. duplicates drop code, force
+
+Duplicates in terms of code
+
+(35 observations deleted)
+
+. gen long destcitymarketid = code  // for origin merge
+(1 missing value generated)
+
+. drop code
+
+. tempfile cities_vac
+
+. save `cities_vac'
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.000003 saved as .dta format
+
+. 
+. // * Population by airport-year
+. import delimited using "${PROC_OTHER}population.csv", varnames(1) clear
+(encoding automatically selected: ISO-8859-1)
+(4 vars, 27,480 obs)
+
+. // expected cols: airport, msa, year, population
+. keep airport year population
+
+. rename airport airport_id
+
+. tempfile pops
+
+. save `pops'
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.000004 saved as .dta format
+
+. 
+. // * Slot-controlled airports
+. import delimited using "${PROC_OTHER}slot_controlled.csv", varnames(1) clear
+(encoding automatically selected: ISO-8859-2)
+(2 vars, 6,430 obs)
+
+. // expected cols: airport, slot_controlled
+. // ensure lowercase column names
+. foreach v of varlist * {
+  2.     local newname = lower("`v'")
+  3.     if "`v'" != "`newname'" {
+  4.         rename `v' `newname'
+  5.     }
+  6. }
+
+. rename airport airport_id
+
+. tempfile slots
+
+. save `slots'
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.000005 saved as .dta format
+
+. 
+. // * T_MASTER_CORD (airport metadata; filter to CONUS)
+. 
+. import delimited using "${PROC_OTHER}t_master_cord.csv", varnames(1) clear
+(encoding automatically selected: ISO-8859-1)
+(28 vars, 18,944 obs)
+
+. // ensure lowercase column names
+. foreach v of varlist * {
+  2.     local newname = lower("`v'")
+  3.     if "`v'" != "`newname'" {
+  4.         rename `v' `newname'
+  5.     }
+  6. }
+
+. keep if airport_country_code_iso == "US" & !inlist(airport_state_code,"PR","VI","TT","HI","AK")
+(13,182 observations deleted)
+
+. 
+. keep airport_id
+
+. duplicates drop
+
+Duplicates in terms of all variables
+
+(3,596 observations deleted)
+
+. rename airport_id originairportid  // for origin merge
+
+. tempfile conus_origin
+
+. save `conus_origin'
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.000006 saved as .dta format
+
+. 
+. // Create separate copy for destination merge
+. rename originairportid destairportid
+
+. tempfile conus_dest
+
+. save `conus_dest'
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.000007 saved as .dta format
+
+. 
+. // * Lookup & Hub (wide) -> long(Code, carrier, hub)
+. import delimited using "${PROC_OTHER}lookup_and_hub_r.csv", varnames(1) clear stringcols(_all)
+(encoding automatically selected: ISO-8859-9)
+(134 vars, 6,429 obs)
+
+. 
+. // ensure lowercase column names
+. foreach v of varlist * {
+  2.     local newname = lower("`v'")
+  3.     if "`v'" != "`newname'" {
+  4.         rename `v' `newname'
+  5.     }
+  6. }
+
+. // expected cols: code, description, airport, then 100+ carrier columns (AA, DL, WN, NK, UA, …)
+. drop description airport
+
+. // Prefix all non-code columns with "hub_"
+. unab allvars : *
+
+. local rest : list allvars - code
+
+. foreach v of local rest {
+  2.     capture confirm variable `v'
+  3.     if !_rc rename `v' hub_`v'
+  4.     qui destring hub_`v', replace force
+  5. }
+
+. rename hub_code airport_code
+
+. 
+. // reshape to long on stub hub_
+. qui reshape long hub_, i(airport_code) j(carrier) string
+
+. rename airport_code airport_id
+
+. rename hub_ hub
+
+. replace hub = 0 if missing(hub)
+(0 real changes made)
+
+. tempfile hubs_long
+
+. save `hubs_long'
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.000008 saved as .dta format
+
+. 
+. // CPI (already base=2008 index) — if yours is year,index
+. // If the file has columns like year,index (2008=100), we’ll read and use as deflator map.
+. import delimited using "${RAW_OTHER}cpi_index.csv", varnames(1) clear
+(encoding automatically selected: ISO-8859-1)
+(2 vars, 26 obs)
+
+. // Expect columns: year,value  (value = 100 in 2008)
+. keep year value
+
+. rename value deflator_index
+
+. tempfile cpi
+
+. save `cpi'
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.000009 saved as .dta format
+
+. 
+. // ---------------------- INIT OUTPUT ------------------------------------------
+. capture confirm file "${OUT_FILE}"
+
+. local appendflag =  0 // no! _rc==0  // if the file exists, we’ll append
+
+. 
+. // ---------------------- LOOP OVER YEARS/QUARTERS -----------------------------
+. di as yellow "------------------------------------ Processing DB1B Market data ------------------------------------"
+------------------------------------ Processing DB1B Market data ------------------------------------
+
+.     forvalues Y = $YEARS {
+  2.         // grab the year’s CPI deflator (index with 2008=100)
+.         use `cpi', clear
+  3.         keep if year==`Y'
+  4.         qui summarize deflator_index
+  5.         local DEF = r(mean)  // year-level deflator index
+  6. 
+.         foreach Q in $QUARTERS {
+  7.             di as yellow "--------------------------------- Processing `Y' Q`Q' ------------------------------------
+> --"
+  8. 
+.             // ---------------- Load one quarter market CSV -------------------
+.             local fname = "db1b_market_`Y'q`Q'"
+  9.             import delimited using "${PROC_DB1B}`fname'.csv", varnames(1) clear
+ 10.             
+.             // If the 42nd var is junk "V" in the R flow, mirror that:
+.             capture ds, has(varnum 42)
+ 11.             if !_rc {
+ 12.                 local v42 `r(varlist)'
+ 13.                 capture confirm variable `v42'
+ 14.                 if !_rc rename `v42' V
+ 15.             }
+ 16. 
+.             // ---------------- Recreate key derived fields -------------------
+.             // Real fare using CPI index (2008=100)
+.             // If the CPI index is 100 in 2008, deflate by DEF/100:
+.             gen double mktfare_real = mktfare / (`DEF'/100)
+ 17. 
+.             // Keep "good" tickets, fare band, and CONUS airports
+.             keep if tkcarrierchange==0
+ 18.             keep if mktfare_real>=25 & mktfare_real<=2500
+ 19. 
+.             // Limit to CONUS origin/dest
+.             tempfile current
+ 20.             save `current'
+ 21. 
+.             use `current', clear
+ 22.             di as yellow "    ---------  Filtering CONUS airports ---------"
+ 23. 
+.             merge m:1 originairportid using `conus_origin', keep(match master) nogenerate
+ 24. 
+.             merge m:1 destairportid using `conus_dest', keep(match master) nogenerate
+ 25.             
+.             // Market passengers per O-D (quarter)
+.             bysort origincitymarketid destcitymarketid: egen double market_passengers = total(passengers)
+ 26.             // Keep markets >= 20 pax/day on average, scaled for 10% sample: 20*365/(4*10)
+.             keep if market_passengers >= 20*365/(4*10)
+ 27. 
+.             // Core variables for merging/aggregation
+.             gen long   origin      = origincitymarketid
+ 28.             gen long   destination = destcitymarketid
+ 29.             gen str2   carrier     = tkcarrier
+ 30.             gen byte   nonstop     = (mktcoupons==1)
+ 31. 
+.             // ---------------- Merge slot_controlled ------------------------
+.             di as yellow "    ---------  Filtering slot-controlled airports ---------"
+ 32. 
+.             gen airport_id = originairportid
+ 33.             merge m:1 airport_id using `slots', keep(match master) nogenerate
+ 34.             rename slot_controlled origin_slot_controlled
+ 35.             replace origin_slot_controlled = 0 if missing(origin_slot_controlled)
+ 36. 
+.             replace airport_id = destairportid
+ 37.             merge m:1 airport_id using `slots', keep(match master) nogenerate
+ 38.             rename slot_controlled destination_slot_controlled
+ 39.             replace destination_slot_controlled = 0 if missing(destination_slot_controlled)
+ 40. 
+.             drop airport_id
+ 41. 
+.             // ---------------- Merge destination vacation flag ---------------
+.             di as yellow "    ---------  Merging destination vacation flags ---------"
+ 42.             // Cities table keyed by Code (city market id) and vacation_spot
+.             // cities_vac has: Code, vacation_spot -> now destcitymarketid
+.             merge m:1 destcitymarketid using `cities_vac', ///
+>                 keep(match master) nogenerate
+ 43.             rename vacation_spot destination_vacation
+ 44.             replace destination_vacation = 0 if missing(destination_vacation)
+ 45. 
+.             // ---------------- Merge populations by airport-year -------------
+.             di as yellow "    ---------  Merging airport populations ---------"
+ 46.             gen airport_id = originairportid
+ 47.             merge m:1 airport_id year using `pops', ///
+>                 keep(match master) nogenerate
+ 48.             rename population origin_pop
+ 49.             replace origin_pop = . if origin_pop<=0
+ 50. 
+.             replace airport_id = destairportid
+ 51.             merge m:1 airport_id year using `pops', ///
+>                 keep(match master) nogenerate
+ 52.             rename population dest_pop
+ 53.             replace dest_pop = . if dest_pop<=0
+ 54. 
+.             gen double market_size = sqrt(origin_pop * dest_pop)
+ 55.             drop airport_id
+ 56.             // drop origin_pop dest_pop // not sure if later needed
+. 
+.             // ---------------- Merge hub indicators (origin/dest) ------------
+.             di as yellow "    ---------  Merging hub indicators ---------"
+ 57.             // hubs_long: Code, carrier, hub
+.             // For airports we need Code==AirportID (lookup_and_hub_r used airport codes in "Code")
+.             // For origin:
+. 
+.             gen airport_id = originairportid
+ 58.             merge m:1 airport_id carrier using `hubs_long', keep(match master) nogenerate
+ 59.             rename hub origin_hub
+ 60.             replace origin_hub = 0 if missing(origin_hub)
+ 61. 
+.             replace airport_id = destairportid
+ 62.             merge m:1 airport_id carrier using `hubs_long', keep(match master) nogenerate
+ 63.             rename hub destination_hub
+ 64.             replace destination_hub = 0 if missing(destination_hub)
+ 65.             drop airport_id
+ 66. 
+.             // ---------------- Aggregate to (O-D-carrier-quarter) ------------
+.             di as yellow "    ---------  Aggregating to (O-D-carrier-quarter) ---------"
+ 67.             
+.             // First calculate passenger-weighted averages for distance and fare variables
+.             gen double weighted_distance = mktdistance * passengers
+ 68.             gen double weighted_nonstop_miles = nonstopmiles * passengers
+ 69.             gen double weighted_fare = mktfare_real * passengers
+ 70.             
+.             // Collapse with appropriate aggregation methods
+.             collapse ///
+>                 (sum)   total_passengers = passengers ///
+>                         weighted_distance weighted_nonstop_miles weighted_fare ///
+>                 (mean)  market_size ///
+>                         origin_hub destination_hub ///
+>                         destination_vacation ///
+>                         origin_slot_controlled destination_slot_controlled ///
+>                         share_nonstop = nonstop, ///
+>                 by(origin destination carrier year quarter)
+ 71. 
+.             
+.             // Calculate final weighted averages
+.             gen double average_distance = weighted_distance / total_passengers
+ 72.             gen double average_nonstop_miles = weighted_nonstop_miles / total_passengers
+ 73.             gen double average_fare = weighted_fare / total_passengers
+ 74.             gen double average_extra_miles = average_distance - average_nonstop_miles
+ 75.             
+.             // Clean up temporary variables
+.             drop weighted_distance weighted_nonstop_miles weighted_fare
+ 76. 
+. 
+.             di as yellow "               Data collapsed to (O-D-carrier-quarter) level successfully, obs: " _N 
+ 77. 
+.             di as yellow "    ---------  Creating identifiers ---------"
+ 78.             // ---------------- Identifiers and carrier types -----------------
+.             // Use more efficient string creation to avoid "expression too long" error
+.             tostring origin, gen(origin_str)
+ 79.             tostring destination, gen(dest_str)
+ 80.             gen str25 market = origin_str + "-" + dest_str
+ 81. 
+.             tostring year, gen(year_str)
+ 82.             tostring quarter, gen(quarter_str)  
+ 83.             gen str25 time = year_str + "-" + quarter_str
+ 84.             drop year_str quarter_str origin_str dest_str
+ 85. 
+.             di as yellow "    ---------  Creating carrier flags ---------"
+ 86. 
+.             do "src/carrier_flags.do"
+ 87. 
+.             di as yellow "    ---------  Creating rival stats ---------"
+ 88.             // * Create presence and num_markets variables first (needed for rival calculations)
+.             
+.             // Presence = carrier's share of passengers at ORIGIN in that year/quarter (across all destinations)
+.             // First calculate total passengers by origin-carrier-year-quarter
+.             bysort origin carrier year quarter: egen origin_carrier_pax = total(total_passengers)
+ 89.             // Then calculate total passengers by origin-year-quarter (all carriers)
+.             bysort origin year quarter: egen origin_total_pax = total(total_passengers)
+ 90.             // Presence is the share
+.             gen presence = origin_carrier_pax / origin_total_pax
+ 91.             replace presence = 0 if missing(presence)
+ 92.             
+.             // num_markets = number of distinct destinations this carrier serves from this origin in year/quarter
+.             bysort origin carrier year quarter: egen num_markets = count(destination) // num_markets, is num of destina
+> tions. 
+ 93. 
+.             drop origin_carrier_pax origin_total_pax
+ 94.             
+.             // calculate rival stats using presence and num_markets
+.             // These are calculated at the O-D level (market level)
+.             sort origin destination year quarter
+ 95.             by origin destination year quarter: egen double total_presence = total(presence)
+ 96.             by origin destination year quarter: egen double total_num_markets = total(num_markets)
+ 97.             by origin destination year quarter: gen double average_presence_rival = ///
+>                 (total_presence - presence) / ( _N - 1 )
+ 98.             by origin destination year quarter: gen double average_num_markets_rival = ///
+>                 (total_num_markets - num_markets) / ( _N - 1 )
+ 99.             by origin destination year quarter: gen int rival_carriers = _N - 1
+100.             keep if rival_carriers > 0 // removing monopolies
+101. 
+.             di as yellow "    ---------  Creating shares and log differences ---------"
+102. 
+.             // * Shares
+.             by origin destination year quarter: gen double share = 10 * total_passengers / market_size // mkt size is s
+> qrt(orig_pop*dest_pop), so share is scaled by 10
+103.             by origin destination year quarter: egen double sum_share = total(share)
+104.             gen outside_share = 1 - sum_share
+105.             gen double within_share  = sum_share //! check if groups in nest are supposed to be something else
+106. 
+.             drop sum_share
+107. 
+.             gen double log_diff_shares = ln(share) - ln(outside_share)
+108. 
+.             sum share within_share outside_share log_diff_shares
+109. 
+.             // ---------------- Append to CSV --------------------------------
+.             di as yellow "    ---------  Writing data to output file ---------"
+110.             
+.             // Save current quarter data
+.             tempfile quarter_data
+111.             save `quarter_data', replace
+112. 
+.             // make sure types are correct
+.             // mkt and time to str
+.             
+.             // Determine if we need column headers (first time writing)
+.             if `appendflag' == 0 {
+113.                 di as yellow "           Writing headers for first quarter..."
+114.                 export delimited using "${OUT_FILE}", replace
+115.                 local appendflag = 1
+116.             }
+117.             else {
+118.                 di as yellow "           Appending `Y'Q`Q' data to existing file..."
+119.                 // Load existing data and append new quarter
+.                 preserve
+120.                 import delimited using "${OUT_FILE}", clear
+121.                 append using `quarter_data'
+122.                 export delimited using "${OUT_FILE}", replace
+123.                 restore
+124.             }
+125.             
+.             di as green "           Successfully wrote `Y'Q`Q' data to ${OUT_FILE}"
+126.         }
+127.     }
+(25 observations deleted)
+--------------------------------- Processing 2005 Q1 --------------------------------------
+(encoding automatically selected: UTF-8)
+(15 vars, 4,663,809 obs)
+(232,228 observations deleted)
+(256,906 observations deleted)
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000a saved as .dta format
+    ---------  Filtering CONUS airports ---------
+(variable originairportid was int, now long to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                       135,019
+        from master                   135,019  
+        from using                          0  
+
+    Matched                         4,039,656  
+    -----------------------------------------
+(variable destairportid was int, now long to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                       132,289
+        from master                   132,289  
+        from using                          0  
+
+    Matched                         4,042,386  
+    -----------------------------------------
+(833,526 observations deleted)
+(467 missing values generated)
+    ---------  Filtering slot-controlled airports ---------
+(variable airport_id was float, now double to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,341,149  
+    -----------------------------------------
+(0 real changes made)
+(3,341,149 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,341,149  
+    -----------------------------------------
+(0 real changes made)
+    ---------  Merging destination vacation flags ---------
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,341,149  
+    -----------------------------------------
+(0 real changes made)
+    ---------  Merging airport populations ---------
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                        29,409
+        from master                    29,409  
+        from using                          0  
+
+    Matched                         3,311,740  
+    -----------------------------------------
+(0 real changes made)
+(3,341,149 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                        28,350
+        from master                    28,350  
+        from using                          0  
+
+    Matched                         3,312,799  
+    -----------------------------------------
+(0 real changes made)
+(56,421 missing values generated)
+    ---------  Merging hub indicators ---------
+(variable airport_id was float, now double to accommodate using data's values)
+(variable carrier was str2, now str4 to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                     3,341,149
+        from master                 3,341,149  
+        from using                          0  
+
+    Matched                                 0  
+    -----------------------------------------
+(3,341,149 real changes made)
+(3,341,149 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                     3,341,149
+        from master                 3,341,149  
+        from using                          0  
+
+    Matched                                 0  
+    -----------------------------------------
+(3,341,149 real changes made)
+    ---------  Aggregating to (O-D-carrier-quarter) ---------
+               Data collapsed to (O-D-carrier-quarter) level successfully, obs: 31452
+    ---------  Creating identifiers ---------
+origin_str generated as str5
+dest_str generated as str5
+year_str generated as str4
+quarter_str generated as str1
+    ---------  Creating carrier flags ---------
+
+. // -----------------------------------------------------------------------------
+. // * File:    processing_data.do
+. // * Purpose: Contains logit to create major carrier flags
+. // *          and carrier type classifications
+. // -----------------------------------------------------------------------------
+. 
+. gen major = 0
+
+. 
+. // Use inlist()  does not allowed more than 10 itemrms
+. replace major = 1 if year==2019 & inlist(carrier,"AS","G4","AA","5Y","DL","MQ","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2019 & inlist(carrier,"B6","RC","OO","WN","NK","UA")
+(0 real changes made)
+
+. replace major = 1 if year==2018 & inlist(carrier,"AS","G4","AA","5Y","DL","MQ","EV","F9")
+(0 real changes made)
+
+. replace major = 1 if year==2018 & inlist(carrier,"HA","B6","OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2017 & inlist(carrier,"AS","G4","AA","5Y","DL","F9","HA","B6")
+(0 real changes made)
+
+. replace major = 1 if year==2017 & inlist(carrier,"OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2016 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2016 & inlist(carrier,"B6","OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2015 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2015 & inlist(carrier,"B6","OO","WN","NK","UA","US","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2014 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2014 & inlist(carrier,"B6","OO","WN","NK","UA","US","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"8C","AS","AA","MQ","5Y","DL","EV","F9")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"HA","B6","K4","OO","WN","NK","UA","US")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"VX","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2012 & inlist(carrier,"8C","AS","AA","MQ","5Y","DL","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2012 & inlist(carrier,"B6","K4","OO","WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2011 & inlist(carrier,"8C","AS","AA","MQ","5Y","CO","CS","DL")
+(0 real changes made)
+
+. replace major = 1 if year==2011 & inlist(carrier,"F9","HA","B6","OO","WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"CO","DO","F9","HA","B6","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"CO","DL","F9","HA","B6","YV","NW","OO")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"CO","DL","F9","B6","YV","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"GB","8C","AS","AA","MQ","HP","EV","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"CO","DL","F9","B6","YV","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"GB","8C","AS","AA","MQ","TZ","HP","EV")
+(0 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"OH","CO","DL","B6","NW","OO","WN","UA")
+(0 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2005 & inlist(carrier,"AS","AA","MQ","TZ","HP","OH","CO","EV")
+(9,894 real changes made)
+
+. replace major = 1 if year==2005 & inlist(carrier,"DL","B6","NW","WN","UA","US","WO")
+(18,067 real changes made)
+
+. 
+. // Create carrier type classifications
+. gen legacy = 0
+
+. gen lcc = 0
+
+. 
+. // Legacy carriers (traditional full-service carriers)
+. replace legacy = 1 if inlist(carrier,"AS","AQ","AA","CO","DL")
+(12,443 real changes made)
+
+. replace legacy = 1 if inlist(carrier,"HA","NW","TW","UA","US")
+(11,355 real changes made)
+
+. 
+. // Low-cost carriers
+. replace lcc = 1 if inlist(carrier,"TZ","F9","YV","DH","B6","YX","SX","XP","WN")
+(4,981 real changes made)
+
+. replace lcc = 1 if inlist(carrier,"NK","SY","U5","VC")
+(174 real changes made)
+
+. 
+. 
+. di as text "    Major carrier flags and carrier type classifications created successfully."
+    Major carrier flags and carrier type classifications created successfully.
+
+. 
+end of do-file
+    ---------  Creating rival stats ---------
+(0 real changes made)
+(115 missing values generated)
+(115 missing values generated)
+(115 observations deleted)
+    ---------  Creating shares and log differences ---------
+(652 missing values generated)
+(652 missing values generated)
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+       share |     30,685    .0011555    .0052606   6.51e-07   .2610208
+within_share |     31,337    .0081394    .0181986          0   .4885763
+outside_sh~e |     31,337    .9918606    .0181986   .5114237          1
+log_diff_s~s |     30,685   -8.364057    1.897447  -14.21975  -.6725984
+    ---------  Writing data to output file ---------
+(file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000b not found)
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000b saved as .dta format
+           Writing headers for first quarter...
+file ./data/processed/combined/airline_data.csv saved
+           Successfully wrote 2005Q1 data to ./data/processed/combined/airline_data.csv
+--------------------------------- Processing 2005 Q2 --------------------------------------
+(encoding automatically selected: UTF-8)
+(15 vars, 5,329,759 obs)
+(253,082 observations deleted)
+(297,800 observations deleted)
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000c saved as .dta format
+    ---------  Filtering CONUS airports ---------
+(variable originairportid was int, now long to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                       151,526
+        from master                   151,526  
+        from using                          0  
+
+    Matched                         4,627,351  
+    -----------------------------------------
+(variable destairportid was int, now long to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                       149,872
+        from master                   149,872  
+        from using                          0  
+
+    Matched                         4,629,005  
+    -----------------------------------------
+(896,286 observations deleted)
+(656 missing values generated)
+    ---------  Filtering slot-controlled airports ---------
+(variable airport_id was float, now double to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,882,591  
+    -----------------------------------------
+(0 real changes made)
+(3,882,591 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,882,591  
+    -----------------------------------------
+(0 real changes made)
+    ---------  Merging destination vacation flags ---------
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,882,591  
+    -----------------------------------------
+(0 real changes made)
+    ---------  Merging airport populations ---------
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                        29,505
+        from master                    29,505  
+        from using                          0  
+
+    Matched                         3,853,086  
+    -----------------------------------------
+(0 real changes made)
+(3,882,591 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                        28,801
+        from master                    28,801  
+        from using                          0  
+
+    Matched                         3,853,790  
+    -----------------------------------------
+(0 real changes made)
+(57,258 missing values generated)
+    ---------  Merging hub indicators ---------
+(variable airport_id was float, now double to accommodate using data's values)
+(variable carrier was str2, now str4 to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                     3,882,591
+        from master                 3,882,591  
+        from using                          0  
+
+    Matched                                 0  
+    -----------------------------------------
+(3,882,591 real changes made)
+(3,882,591 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                     3,882,591
+        from master                 3,882,591  
+        from using                          0  
+
+    Matched                                 0  
+    -----------------------------------------
+(3,882,591 real changes made)
+    ---------  Aggregating to (O-D-carrier-quarter) ---------
+               Data collapsed to (O-D-carrier-quarter) level successfully, obs: 34413
+    ---------  Creating identifiers ---------
+origin_str generated as str5
+dest_str generated as str5
+year_str generated as str4
+quarter_str generated as str1
+    ---------  Creating carrier flags ---------
+
+. // -----------------------------------------------------------------------------
+. // * File:    processing_data.do
+. // * Purpose: Contains logit to create major carrier flags
+. // *          and carrier type classifications
+. // -----------------------------------------------------------------------------
+. 
+. gen major = 0
+
+. 
+. // Use inlist()  does not allowed more than 10 itemrms
+. replace major = 1 if year==2019 & inlist(carrier,"AS","G4","AA","5Y","DL","MQ","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2019 & inlist(carrier,"B6","RC","OO","WN","NK","UA")
+(0 real changes made)
+
+. replace major = 1 if year==2018 & inlist(carrier,"AS","G4","AA","5Y","DL","MQ","EV","F9")
+(0 real changes made)
+
+. replace major = 1 if year==2018 & inlist(carrier,"HA","B6","OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2017 & inlist(carrier,"AS","G4","AA","5Y","DL","F9","HA","B6")
+(0 real changes made)
+
+. replace major = 1 if year==2017 & inlist(carrier,"OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2016 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2016 & inlist(carrier,"B6","OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2015 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2015 & inlist(carrier,"B6","OO","WN","NK","UA","US","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2014 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2014 & inlist(carrier,"B6","OO","WN","NK","UA","US","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"8C","AS","AA","MQ","5Y","DL","EV","F9")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"HA","B6","K4","OO","WN","NK","UA","US")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"VX","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2012 & inlist(carrier,"8C","AS","AA","MQ","5Y","DL","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2012 & inlist(carrier,"B6","K4","OO","WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2011 & inlist(carrier,"8C","AS","AA","MQ","5Y","CO","CS","DL")
+(0 real changes made)
+
+. replace major = 1 if year==2011 & inlist(carrier,"F9","HA","B6","OO","WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"CO","DO","F9","HA","B6","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"CO","DL","F9","HA","B6","YV","NW","OO")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"CO","DL","F9","B6","YV","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"GB","8C","AS","AA","MQ","HP","EV","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"CO","DL","F9","B6","YV","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"GB","8C","AS","AA","MQ","TZ","HP","EV")
+(0 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"OH","CO","DL","B6","NW","OO","WN","UA")
+(0 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2005 & inlist(carrier,"AS","AA","MQ","TZ","HP","OH","CO","EV")
+(10,500 real changes made)
+
+. replace major = 1 if year==2005 & inlist(carrier,"DL","B6","NW","WN","UA","US","WO")
+(19,514 real changes made)
+
+. 
+. // Create carrier type classifications
+. gen legacy = 0
+
+. gen lcc = 0
+
+. 
+. // Legacy carriers (traditional full-service carriers)
+. replace legacy = 1 if inlist(carrier,"AS","AQ","AA","CO","DL")
+(13,581 real changes made)
+
+. replace legacy = 1 if inlist(carrier,"HA","NW","TW","UA","US")
+(12,168 real changes made)
+
+. 
+. // Low-cost carriers
+. replace lcc = 1 if inlist(carrier,"TZ","F9","YV","DH","B6","YX","SX","XP","WN")
+(5,585 real changes made)
+
+. replace lcc = 1 if inlist(carrier,"NK","SY","U5","VC")
+(211 real changes made)
+
+. 
+. 
+. di as text "    Major carrier flags and carrier type classifications created successfully."
+    Major carrier flags and carrier type classifications created successfully.
+
+. 
+end of do-file
+    ---------  Creating rival stats ---------
+(0 real changes made)
+(136 missing values generated)
+(136 missing values generated)
+(136 observations deleted)
+    ---------  Creating shares and log differences ---------
+(584 missing values generated)
+(584 missing values generated)
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+       share |     33,693    .0012051    .0054528   6.51e-07   .2747149
+within_share |     34,277    .0087446     .019166          0   .5241644
+outside_sh~e |     34,277    .9912554     .019166   .4758356          1
+log_diff_s~s |     33,693   -8.284191    1.871513  -14.21369  -.5493386
+    ---------  Writing data to output file ---------
+(file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000d not found)
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000d saved as .dta format
+           Appending 2005Q2 data to existing file...
+(encoding automatically selected: ISO-8859-1)
+(33 vars, 31,337 obs)
+(variable carrier was str2, now str4 to accommodate using data's values)
+(variable total_passengers was long, now double to accommodate using data's values)
+(variable market_size was float, now double to accommodate using data's values)
+(variable origin_hub was byte, now float to accommodate using data's values)
+(variable destination_hub was byte, now float to accommodate using data's values)
+(variable destination_vacation was byte, now float to accommodate using data's values)
+(variable average_distance was float, now double to accommodate using data's values)
+(variable average_nonstop_miles was float, now double to accommodate using data's values)
+(variable average_fare was float, now double to accommodate using data's values)
+(variable average_extra_miles was float, now double to accommodate using data's values)
+(variable market was str11, now str25 to accommodate using data's values)
+(variable time was str6, now str25 to accommodate using data's values)
+(variable major was byte, now float to accommodate using data's values)
+(variable legacy was byte, now float to accommodate using data's values)
+(variable lcc was byte, now float to accommodate using data's values)
+(variable num_markets was int, now float to accommodate using data's values)
+(variable total_presence was float, now double to accommodate using data's values)
+(variable total_num_markets was int, now double to accommodate using data's values)
+(variable average_presence_rival was float, now double to accommodate using data's values)
+(variable average_num_markets_rival was float, now double to accommodate using data's values)
+(variable rival_carriers was byte, now int to accommodate using data's values)
+(variable share was float, now double to accommodate using data's values)
+(variable within_share was float, now double to accommodate using data's values)
+(variable log_diff_shares was float, now double to accommodate using data's values)
+file ./data/processed/combined/airline_data.csv saved
+           Successfully wrote 2005Q2 data to ./data/processed/combined/airline_data.csv
+--------------------------------- Processing 2005 Q3 --------------------------------------
+(encoding automatically selected: UTF-8)
+(15 vars, 5,198,296 obs)
+(266,451 observations deleted)
+(306,044 observations deleted)
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000f saved as .dta format
+    ---------  Filtering CONUS airports ---------
+(variable originairportid was int, now long to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                       150,502
+        from master                   150,502  
+        from using                          0  
+
+    Matched                         4,475,299  
+    -----------------------------------------
+(variable destairportid was int, now long to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                       147,584
+        from master                   147,584  
+        from using                          0  
+
+    Matched                         4,478,217  
+    -----------------------------------------
+(883,083 observations deleted)
+(472 missing values generated)
+    ---------  Filtering slot-controlled airports ---------
+(variable airport_id was float, now double to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,742,718  
+    -----------------------------------------
+(0 real changes made)
+(3,742,718 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,742,718  
+    -----------------------------------------
+(0 real changes made)
+    ---------  Merging destination vacation flags ---------
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,742,718  
+    -----------------------------------------
+(0 real changes made)
+    ---------  Merging airport populations ---------
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                        23,772
+        from master                    23,772  
+        from using                          0  
+
+    Matched                         3,718,946  
+    -----------------------------------------
+(0 real changes made)
+(3,742,718 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                        23,406
+        from master                    23,406  
+        from using                          0  
+
+    Matched                         3,719,312  
+    -----------------------------------------
+(0 real changes made)
+(46,081 missing values generated)
+    ---------  Merging hub indicators ---------
+(variable airport_id was float, now double to accommodate using data's values)
+(variable carrier was str2, now str4 to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                     3,742,718
+        from master                 3,742,718  
+        from using                          0  
+
+    Matched                                 0  
+    -----------------------------------------
+(3,742,718 real changes made)
+(3,742,718 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                     3,742,718
+        from master                 3,742,718  
+        from using                          0  
+
+    Matched                                 0  
+    -----------------------------------------
+(3,742,718 real changes made)
+    ---------  Aggregating to (O-D-carrier-quarter) ---------
+               Data collapsed to (O-D-carrier-quarter) level successfully, obs: 34008
+    ---------  Creating identifiers ---------
+origin_str generated as str5
+dest_str generated as str5
+year_str generated as str4
+quarter_str generated as str1
+    ---------  Creating carrier flags ---------
+
+. // -----------------------------------------------------------------------------
+. // * File:    processing_data.do
+. // * Purpose: Contains logit to create major carrier flags
+. // *          and carrier type classifications
+. // -----------------------------------------------------------------------------
+. 
+. gen major = 0
+
+. 
+. // Use inlist()  does not allowed more than 10 itemrms
+. replace major = 1 if year==2019 & inlist(carrier,"AS","G4","AA","5Y","DL","MQ","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2019 & inlist(carrier,"B6","RC","OO","WN","NK","UA")
+(0 real changes made)
+
+. replace major = 1 if year==2018 & inlist(carrier,"AS","G4","AA","5Y","DL","MQ","EV","F9")
+(0 real changes made)
+
+. replace major = 1 if year==2018 & inlist(carrier,"HA","B6","OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2017 & inlist(carrier,"AS","G4","AA","5Y","DL","F9","HA","B6")
+(0 real changes made)
+
+. replace major = 1 if year==2017 & inlist(carrier,"OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2016 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2016 & inlist(carrier,"B6","OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2015 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2015 & inlist(carrier,"B6","OO","WN","NK","UA","US","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2014 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2014 & inlist(carrier,"B6","OO","WN","NK","UA","US","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"8C","AS","AA","MQ","5Y","DL","EV","F9")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"HA","B6","K4","OO","WN","NK","UA","US")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"VX","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2012 & inlist(carrier,"8C","AS","AA","MQ","5Y","DL","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2012 & inlist(carrier,"B6","K4","OO","WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2011 & inlist(carrier,"8C","AS","AA","MQ","5Y","CO","CS","DL")
+(0 real changes made)
+
+. replace major = 1 if year==2011 & inlist(carrier,"F9","HA","B6","OO","WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"CO","DO","F9","HA","B6","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"CO","DL","F9","HA","B6","YV","NW","OO")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"CO","DL","F9","B6","YV","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"GB","8C","AS","AA","MQ","HP","EV","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"CO","DL","F9","B6","YV","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"GB","8C","AS","AA","MQ","TZ","HP","EV")
+(0 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"OH","CO","DL","B6","NW","OO","WN","UA")
+(0 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2005 & inlist(carrier,"AS","AA","MQ","TZ","HP","OH","CO","EV")
+(10,385 real changes made)
+
+. replace major = 1 if year==2005 & inlist(carrier,"DL","B6","NW","WN","UA","US","WO")
+(19,260 real changes made)
+
+. 
+. // Create carrier type classifications
+. gen legacy = 0
+
+. gen lcc = 0
+
+. 
+. // Legacy carriers (traditional full-service carriers)
+. replace legacy = 1 if inlist(carrier,"AS","AQ","AA","CO","DL")
+(13,400 real changes made)
+
+. replace legacy = 1 if inlist(carrier,"HA","NW","TW","UA","US")
+(11,916 real changes made)
+
+. 
+. // Low-cost carriers
+. replace lcc = 1 if inlist(carrier,"TZ","F9","YV","DH","B6","YX","SX","XP","WN")
+(5,582 real changes made)
+
+. replace lcc = 1 if inlist(carrier,"NK","SY","U5","VC")
+(195 real changes made)
+
+. 
+. 
+. di as text "    Major carrier flags and carrier type classifications created successfully."
+    Major carrier flags and carrier type classifications created successfully.
+
+. 
+end of do-file
+    ---------  Creating rival stats ---------
+(0 real changes made)
+(143 missing values generated)
+(143 missing values generated)
+(143 observations deleted)
+    ---------  Creating shares and log differences ---------
+(477 missing values generated)
+(477 missing values generated)
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+       share |     33,388    .0011872    .0053661   6.51e-07   .2589812
+within_share |     33,865    .0086412    .0188592          0   .5180457
+outside_sh~e |     33,865    .9913588    .0188592   .4819543          1
+log_diff_s~s |     33,388   -8.299381    1.875303  -14.21194  -.6210936
+    ---------  Writing data to output file ---------
+(file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000g not found)
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000g saved as .dta format
+           Appending 2005Q3 data to existing file...
+(encoding automatically selected: ISO-8859-1)
+(33 vars, 65,614 obs)
+(variable carrier was str2, now str4 to accommodate using data's values)
+(variable total_passengers was long, now double to accommodate using data's values)
+(variable market_size was float, now double to accommodate using data's values)
+(variable origin_hub was byte, now float to accommodate using data's values)
+(variable destination_hub was byte, now float to accommodate using data's values)
+(variable destination_vacation was byte, now float to accommodate using data's values)
+(variable average_distance was float, now double to accommodate using data's values)
+(variable average_nonstop_miles was float, now double to accommodate using data's values)
+(variable average_fare was float, now double to accommodate using data's values)
+(variable average_extra_miles was float, now double to accommodate using data's values)
+(variable market was str11, now str25 to accommodate using data's values)
+(variable time was str6, now str25 to accommodate using data's values)
+(variable major was byte, now float to accommodate using data's values)
+(variable legacy was byte, now float to accommodate using data's values)
+(variable lcc was byte, now float to accommodate using data's values)
+(variable num_markets was int, now float to accommodate using data's values)
+(variable total_presence was float, now double to accommodate using data's values)
+(variable total_num_markets was int, now double to accommodate using data's values)
+(variable average_presence_rival was float, now double to accommodate using data's values)
+(variable average_num_markets_rival was float, now double to accommodate using data's values)
+(variable rival_carriers was byte, now int to accommodate using data's values)
+(variable share was float, now double to accommodate using data's values)
+(variable within_share was float, now double to accommodate using data's values)
+(variable log_diff_shares was float, now double to accommodate using data's values)
+file ./data/processed/combined/airline_data.csv saved
+           Successfully wrote 2005Q3 data to ./data/processed/combined/airline_data.csv
+--------------------------------- Processing 2005 Q4 --------------------------------------
+(encoding automatically selected: UTF-8)
+(15 vars, 5,131,012 obs)
+(239,521 observations deleted)
+(283,240 observations deleted)
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000i saved as .dta format
+    ---------  Filtering CONUS airports ---------
+(variable originairportid was int, now long to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                       136,981
+        from master                   136,981  
+        from using                          0  
+
+    Matched                         4,471,270  
+    -----------------------------------------
+(variable destairportid was int, now long to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                       135,732
+        from master                   135,732  
+        from using                          0  
+
+    Matched                         4,472,519  
+    -----------------------------------------
+(885,506 observations deleted)
+    ---------  Filtering slot-controlled airports ---------
+(variable airport_id was float, now double to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,722,745  
+    -----------------------------------------
+(0 real changes made)
+(3,722,745 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,722,745  
+    -----------------------------------------
+(0 real changes made)
+    ---------  Merging destination vacation flags ---------
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,722,745  
+    -----------------------------------------
+(0 real changes made)
+    ---------  Merging airport populations ---------
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                        28,926
+        from master                    28,926  
+        from using                          0  
+
+    Matched                         3,693,819  
+    -----------------------------------------
+(0 real changes made)
+(3,722,745 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                        28,377
+        from master                    28,377  
+        from using                          0  
+
+    Matched                         3,694,368  
+    -----------------------------------------
+(0 real changes made)
+(56,300 missing values generated)
+    ---------  Merging hub indicators ---------
+(variable airport_id was float, now double to accommodate using data's values)
+(variable carrier was str2, now str4 to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                     3,722,745
+        from master                 3,722,745  
+        from using                          0  
+
+    Matched                                 0  
+    -----------------------------------------
+(3,722,745 real changes made)
+(3,722,745 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                     3,722,745
+        from master                 3,722,745  
+        from using                          0  
+
+    Matched                                 0  
+    -----------------------------------------
+(3,722,745 real changes made)
+    ---------  Aggregating to (O-D-carrier-quarter) ---------
+               Data collapsed to (O-D-carrier-quarter) level successfully, obs: 33009
+    ---------  Creating identifiers ---------
+origin_str generated as str5
+dest_str generated as str5
+year_str generated as str4
+quarter_str generated as str1
+    ---------  Creating carrier flags ---------
+
+. // -----------------------------------------------------------------------------
+. // * File:    processing_data.do
+. // * Purpose: Contains logit to create major carrier flags
+. // *          and carrier type classifications
+. // -----------------------------------------------------------------------------
+. 
+. gen major = 0
+
+. 
+. // Use inlist()  does not allowed more than 10 itemrms
+. replace major = 1 if year==2019 & inlist(carrier,"AS","G4","AA","5Y","DL","MQ","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2019 & inlist(carrier,"B6","RC","OO","WN","NK","UA")
+(0 real changes made)
+
+. replace major = 1 if year==2018 & inlist(carrier,"AS","G4","AA","5Y","DL","MQ","EV","F9")
+(0 real changes made)
+
+. replace major = 1 if year==2018 & inlist(carrier,"HA","B6","OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2017 & inlist(carrier,"AS","G4","AA","5Y","DL","F9","HA","B6")
+(0 real changes made)
+
+. replace major = 1 if year==2017 & inlist(carrier,"OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2016 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2016 & inlist(carrier,"B6","OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2015 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2015 & inlist(carrier,"B6","OO","WN","NK","UA","US","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2014 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2014 & inlist(carrier,"B6","OO","WN","NK","UA","US","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"8C","AS","AA","MQ","5Y","DL","EV","F9")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"HA","B6","K4","OO","WN","NK","UA","US")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"VX","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2012 & inlist(carrier,"8C","AS","AA","MQ","5Y","DL","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2012 & inlist(carrier,"B6","K4","OO","WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2011 & inlist(carrier,"8C","AS","AA","MQ","5Y","CO","CS","DL")
+(0 real changes made)
+
+. replace major = 1 if year==2011 & inlist(carrier,"F9","HA","B6","OO","WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"CO","DO","F9","HA","B6","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"CO","DL","F9","HA","B6","YV","NW","OO")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"CO","DL","F9","B6","YV","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"GB","8C","AS","AA","MQ","HP","EV","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"CO","DL","F9","B6","YV","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"GB","8C","AS","AA","MQ","TZ","HP","EV")
+(0 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"OH","CO","DL","B6","NW","OO","WN","UA")
+(0 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2005 & inlist(carrier,"AS","AA","MQ","TZ","HP","OH","CO","EV")
+(10,485 real changes made)
+
+. replace major = 1 if year==2005 & inlist(carrier,"DL","B6","NW","WN","UA","US","WO")
+(19,070 real changes made)
+
+. 
+. // Create carrier type classifications
+. gen legacy = 0
+
+. gen lcc = 0
+
+. 
+. // Legacy carriers (traditional full-service carriers)
+. replace legacy = 1 if inlist(carrier,"AS","AQ","AA","CO","DL")
+(13,212 real changes made)
+
+. replace legacy = 1 if inlist(carrier,"HA","NW","TW","UA","US")
+(11,861 real changes made)
+
+. 
+. // Low-cost carriers
+. replace lcc = 1 if inlist(carrier,"TZ","F9","YV","DH","B6","YX","SX","XP","WN")
+(4,711 real changes made)
+
+. replace lcc = 1 if inlist(carrier,"NK","SY","U5","VC")
+(230 real changes made)
+
+. 
+. 
+. di as text "    Major carrier flags and carrier type classifications created successfully."
+    Major carrier flags and carrier type classifications created successfully.
+
+. 
+end of do-file
+    ---------  Creating rival stats ---------
+(0 real changes made)
+(141 missing values generated)
+(141 missing values generated)
+(141 observations deleted)
+    ---------  Creating shares and log differences ---------
+(559 missing values generated)
+(559 missing values generated)
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+       share |     32,309    .0011757    .0051027   6.51e-07   .2506565
+within_share |     32,868    .0084919    .0184605          0   .4823328
+outside_sh~e |     32,868    .9915081    .0184605   .5176672          1
+log_diff_s~s |     32,309   -8.358898    1.909719  -14.21361   -.725249
+    ---------  Writing data to output file ---------
+(file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000j not found)
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000j saved as .dta format
+           Appending 2005Q4 data to existing file...
+(encoding automatically selected: ISO-8859-1)
+(33 vars, 99,479 obs)
+(variable carrier was str2, now str4 to accommodate using data's values)
+(variable total_passengers was long, now double to accommodate using data's values)
+(variable market_size was float, now double to accommodate using data's values)
+(variable origin_hub was byte, now float to accommodate using data's values)
+(variable destination_hub was byte, now float to accommodate using data's values)
+(variable destination_vacation was byte, now float to accommodate using data's values)
+(variable average_distance was float, now double to accommodate using data's values)
+(variable average_nonstop_miles was float, now double to accommodate using data's values)
+(variable average_fare was float, now double to accommodate using data's values)
+(variable average_extra_miles was float, now double to accommodate using data's values)
+(variable market was str11, now str25 to accommodate using data's values)
+(variable time was str6, now str25 to accommodate using data's values)
+(variable major was byte, now float to accommodate using data's values)
+(variable legacy was byte, now float to accommodate using data's values)
+(variable lcc was byte, now float to accommodate using data's values)
+(variable num_markets was int, now float to accommodate using data's values)
+(variable total_presence was float, now double to accommodate using data's values)
+(variable total_num_markets was int, now double to accommodate using data's values)
+(variable average_presence_rival was float, now double to accommodate using data's values)
+(variable average_num_markets_rival was float, now double to accommodate using data's values)
+(variable rival_carriers was byte, now int to accommodate using data's values)
+(variable share was float, now double to accommodate using data's values)
+(variable within_share was float, now double to accommodate using data's values)
+(variable log_diff_shares was float, now double to accommodate using data's values)
+file ./data/processed/combined/airline_data.csv saved
+           Successfully wrote 2005Q4 data to ./data/processed/combined/airline_data.csv
+(25 observations deleted)
+--------------------------------- Processing 2006 Q1 --------------------------------------
+(encoding automatically selected: UTF-8)
+(15 vars, 4,776,596 obs)
+(237,891 observations deleted)
+(244,142 observations deleted)
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000l saved as .dta format
+    ---------  Filtering CONUS airports ---------
+(variable originairportid was int, now long to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                       135,969
+        from master                   135,969  
+        from using                          0  
+
+    Matched                         4,158,594  
+    -----------------------------------------
+(variable destairportid was int, now long to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                       133,436
+        from master                   133,436  
+        from using                          0  
+
+    Matched                         4,161,127  
+    -----------------------------------------
+(827,738 observations deleted)
+    ---------  Filtering slot-controlled airports ---------
+(variable airport_id was float, now double to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,466,825  
+    -----------------------------------------
+(0 real changes made)
+(3,466,825 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,466,825  
+    -----------------------------------------
+(0 real changes made)
+    ---------  Merging destination vacation flags ---------
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,466,825  
+    -----------------------------------------
+(0 real changes made)
+    ---------  Merging airport populations ---------
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                        30,034
+        from master                    30,034  
+        from using                          0  
+
+    Matched                         3,436,791  
+    -----------------------------------------
+(0 real changes made)
+(3,466,825 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                        28,518
+        from master                    28,518  
+        from using                          0  
+
+    Matched                         3,438,307  
+    -----------------------------------------
+(0 real changes made)
+(57,867 missing values generated)
+    ---------  Merging hub indicators ---------
+(variable airport_id was float, now double to accommodate using data's values)
+(variable carrier was str2, now str4 to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                     3,466,825
+        from master                 3,466,825  
+        from using                          0  
+
+    Matched                                 0  
+    -----------------------------------------
+(3,466,825 real changes made)
+(3,466,825 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                     3,466,825
+        from master                 3,466,825  
+        from using                          0  
+
+    Matched                                 0  
+    -----------------------------------------
+(3,466,825 real changes made)
+    ---------  Aggregating to (O-D-carrier-quarter) ---------
+               Data collapsed to (O-D-carrier-quarter) level successfully, obs: 31899
+    ---------  Creating identifiers ---------
+origin_str generated as str5
+dest_str generated as str5
+year_str generated as str4
+quarter_str generated as str1
+    ---------  Creating carrier flags ---------
+
+. // -----------------------------------------------------------------------------
+. // * File:    processing_data.do
+. // * Purpose: Contains logit to create major carrier flags
+. // *          and carrier type classifications
+. // -----------------------------------------------------------------------------
+. 
+. gen major = 0
+
+. 
+. // Use inlist()  does not allowed more than 10 itemrms
+. replace major = 1 if year==2019 & inlist(carrier,"AS","G4","AA","5Y","DL","MQ","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2019 & inlist(carrier,"B6","RC","OO","WN","NK","UA")
+(0 real changes made)
+
+. replace major = 1 if year==2018 & inlist(carrier,"AS","G4","AA","5Y","DL","MQ","EV","F9")
+(0 real changes made)
+
+. replace major = 1 if year==2018 & inlist(carrier,"HA","B6","OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2017 & inlist(carrier,"AS","G4","AA","5Y","DL","F9","HA","B6")
+(0 real changes made)
+
+. replace major = 1 if year==2017 & inlist(carrier,"OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2016 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2016 & inlist(carrier,"B6","OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2015 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2015 & inlist(carrier,"B6","OO","WN","NK","UA","US","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2014 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2014 & inlist(carrier,"B6","OO","WN","NK","UA","US","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"8C","AS","AA","MQ","5Y","DL","EV","F9")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"HA","B6","K4","OO","WN","NK","UA","US")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"VX","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2012 & inlist(carrier,"8C","AS","AA","MQ","5Y","DL","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2012 & inlist(carrier,"B6","K4","OO","WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2011 & inlist(carrier,"8C","AS","AA","MQ","5Y","CO","CS","DL")
+(0 real changes made)
+
+. replace major = 1 if year==2011 & inlist(carrier,"F9","HA","B6","OO","WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"CO","DO","F9","HA","B6","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"CO","DL","F9","HA","B6","YV","NW","OO")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"CO","DL","F9","B6","YV","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"GB","8C","AS","AA","MQ","HP","EV","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"CO","DL","F9","B6","YV","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"GB","8C","AS","AA","MQ","TZ","HP","EV")
+(6,410 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"OH","CO","DL","B6","NW","OO","WN","UA")
+(18,894 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"US","WO")
+(3,282 real changes made)
+
+. replace major = 1 if year==2005 & inlist(carrier,"AS","AA","MQ","TZ","HP","OH","CO","EV")
+(0 real changes made)
+
+. replace major = 1 if year==2005 & inlist(carrier,"DL","B6","NW","WN","UA","US","WO")
+(0 real changes made)
+
+. 
+. // Create carrier type classifications
+. gen legacy = 0
+
+. gen lcc = 0
+
+. 
+. // Legacy carriers (traditional full-service carriers)
+. replace legacy = 1 if inlist(carrier,"AS","AQ","AA","CO","DL")
+(12,679 real changes made)
+
+. replace legacy = 1 if inlist(carrier,"HA","NW","TW","UA","US")
+(11,458 real changes made)
+
+. 
+. // Low-cost carriers
+. replace lcc = 1 if inlist(carrier,"TZ","F9","YV","DH","B6","YX","SX","XP","WN")
+(4,450 real changes made)
+
+. replace lcc = 1 if inlist(carrier,"NK","SY","U5","VC")
+(240 real changes made)
+
+. 
+. 
+. di as text "    Major carrier flags and carrier type classifications created successfully."
+    Major carrier flags and carrier type classifications created successfully.
+
+. 
+end of do-file
+    ---------  Creating rival stats ---------
+(0 real changes made)
+(158 missing values generated)
+(158 missing values generated)
+(158 observations deleted)
+    ---------  Creating shares and log differences ---------
+(640 missing values generated)
+(640 missing values generated)
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+       share |     31,101    .0011598    .0048071   6.52e-07    .224104
+within_share |     31,741    .0083721    .0179969          0   .4350494
+outside_sh~e |     31,741    .9916279    .0179969   .5649506          1
+log_diff_s~s |     31,101   -8.390261    1.907866  -14.21605  -.9434928
+    ---------  Writing data to output file ---------
+(file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000m not found)
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000m saved as .dta format
+           Appending 2006Q1 data to existing file...
+(encoding automatically selected: ISO-8859-1)
+(33 vars, 132,347 obs)
+(variable carrier was str2, now str4 to accommodate using data's values)
+(variable total_passengers was long, now double to accommodate using data's values)
+(variable market_size was float, now double to accommodate using data's values)
+(variable origin_hub was byte, now float to accommodate using data's values)
+(variable destination_hub was byte, now float to accommodate using data's values)
+(variable destination_vacation was byte, now float to accommodate using data's values)
+(variable average_distance was float, now double to accommodate using data's values)
+(variable average_nonstop_miles was float, now double to accommodate using data's values)
+(variable average_fare was float, now double to accommodate using data's values)
+(variable average_extra_miles was float, now double to accommodate using data's values)
+(variable market was str11, now str25 to accommodate using data's values)
+(variable time was str6, now str25 to accommodate using data's values)
+(variable major was byte, now float to accommodate using data's values)
+(variable legacy was byte, now float to accommodate using data's values)
+(variable lcc was byte, now float to accommodate using data's values)
+(variable num_markets was int, now float to accommodate using data's values)
+(variable total_presence was float, now double to accommodate using data's values)
+(variable total_num_markets was int, now double to accommodate using data's values)
+(variable average_presence_rival was float, now double to accommodate using data's values)
+(variable average_num_markets_rival was float, now double to accommodate using data's values)
+(variable rival_carriers was byte, now int to accommodate using data's values)
+(variable share was float, now double to accommodate using data's values)
+(variable within_share was float, now double to accommodate using data's values)
+(variable log_diff_shares was float, now double to accommodate using data's values)
+file ./data/processed/combined/airline_data.csv saved
+           Successfully wrote 2006Q1 data to ./data/processed/combined/airline_data.csv
+--------------------------------- Processing 2006 Q2 --------------------------------------
+(encoding automatically selected: UTF-8)
+(15 vars, 5,476,476 obs)
+(283,972 observations deleted)
+(283,626 observations deleted)
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000o saved as .dta format
+    ---------  Filtering CONUS airports ---------
+(variable originairportid was int, now long to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                       157,789
+        from master                   157,789  
+        from using                          0  
+
+    Matched                         4,751,089  
+    -----------------------------------------
+(variable destairportid was int, now long to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                       156,091
+        from master                   156,091  
+        from using                          0  
+
+    Matched                         4,752,787  
+    -----------------------------------------
+(884,686 observations deleted)
+    ---------  Filtering slot-controlled airports ---------
+(variable airport_id was float, now double to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         4,024,192  
+    -----------------------------------------
+(0 real changes made)
+(4,024,192 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         4,024,192  
+    -----------------------------------------
+(0 real changes made)
+    ---------  Merging destination vacation flags ---------
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         4,024,192  
+    -----------------------------------------
+(0 real changes made)
+    ---------  Merging airport populations ---------
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                        31,825
+        from master                    31,825  
+        from using                          0  
+
+    Matched                         3,992,367  
+    -----------------------------------------
+(0 real changes made)
+(4,024,192 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                        31,328
+        from master                    31,328  
+        from using                          0  
+
+    Matched                         3,992,864  
+    -----------------------------------------
+(0 real changes made)
+(62,328 missing values generated)
+    ---------  Merging hub indicators ---------
+(variable airport_id was float, now double to accommodate using data's values)
+(variable carrier was str2, now str4 to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                     4,024,192
+        from master                 4,024,192  
+        from using                          0  
+
+    Matched                                 0  
+    -----------------------------------------
+(4,024,192 real changes made)
+(4,024,192 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                     4,024,192
+        from master                 4,024,192  
+        from using                          0  
+
+    Matched                                 0  
+    -----------------------------------------
+(4,024,192 real changes made)
+    ---------  Aggregating to (O-D-carrier-quarter) ---------
+               Data collapsed to (O-D-carrier-quarter) level successfully, obs: 34912
+    ---------  Creating identifiers ---------
+origin_str generated as str5
+dest_str generated as str5
+year_str generated as str4
+quarter_str generated as str1
+    ---------  Creating carrier flags ---------
+
+. // -----------------------------------------------------------------------------
+. // * File:    processing_data.do
+. // * Purpose: Contains logit to create major carrier flags
+. // *          and carrier type classifications
+. // -----------------------------------------------------------------------------
+. 
+. gen major = 0
+
+. 
+. // Use inlist()  does not allowed more than 10 itemrms
+. replace major = 1 if year==2019 & inlist(carrier,"AS","G4","AA","5Y","DL","MQ","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2019 & inlist(carrier,"B6","RC","OO","WN","NK","UA")
+(0 real changes made)
+
+. replace major = 1 if year==2018 & inlist(carrier,"AS","G4","AA","5Y","DL","MQ","EV","F9")
+(0 real changes made)
+
+. replace major = 1 if year==2018 & inlist(carrier,"HA","B6","OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2017 & inlist(carrier,"AS","G4","AA","5Y","DL","F9","HA","B6")
+(0 real changes made)
+
+. replace major = 1 if year==2017 & inlist(carrier,"OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2016 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2016 & inlist(carrier,"B6","OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2015 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2015 & inlist(carrier,"B6","OO","WN","NK","UA","US","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2014 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2014 & inlist(carrier,"B6","OO","WN","NK","UA","US","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"8C","AS","AA","MQ","5Y","DL","EV","F9")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"HA","B6","K4","OO","WN","NK","UA","US")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"VX","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2012 & inlist(carrier,"8C","AS","AA","MQ","5Y","DL","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2012 & inlist(carrier,"B6","K4","OO","WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2011 & inlist(carrier,"8C","AS","AA","MQ","5Y","CO","CS","DL")
+(0 real changes made)
+
+. replace major = 1 if year==2011 & inlist(carrier,"F9","HA","B6","OO","WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"CO","DO","F9","HA","B6","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"CO","DL","F9","HA","B6","YV","NW","OO")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"CO","DL","F9","B6","YV","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"GB","8C","AS","AA","MQ","HP","EV","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"CO","DL","F9","B6","YV","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"GB","8C","AS","AA","MQ","TZ","HP","EV")
+(6,996 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"OH","CO","DL","B6","NW","OO","WN","UA")
+(20,512 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"US","WO")
+(3,662 real changes made)
+
+. replace major = 1 if year==2005 & inlist(carrier,"AS","AA","MQ","TZ","HP","OH","CO","EV")
+(0 real changes made)
+
+. replace major = 1 if year==2005 & inlist(carrier,"DL","B6","NW","WN","UA","US","WO")
+(0 real changes made)
+
+. 
+. // Create carrier type classifications
+. gen legacy = 0
+
+. gen lcc = 0
+
+. 
+. // Legacy carriers (traditional full-service carriers)
+. replace legacy = 1 if inlist(carrier,"AS","AQ","AA","CO","DL")
+(13,856 real changes made)
+
+. replace legacy = 1 if inlist(carrier,"HA","NW","TW","UA","US")
+(12,445 real changes made)
+
+. 
+. // Low-cost carriers
+. replace lcc = 1 if inlist(carrier,"TZ","F9","YV","DH","B6","YX","SX","XP","WN")
+(4,851 real changes made)
+
+. replace lcc = 1 if inlist(carrier,"NK","SY","U5","VC")
+(246 real changes made)
+
+. 
+. 
+. di as text "    Major carrier flags and carrier type classifications created successfully."
+    Major carrier flags and carrier type classifications created successfully.
+
+. 
+end of do-file
+    ---------  Creating rival stats ---------
+(0 real changes made)
+(160 missing values generated)
+(160 missing values generated)
+(160 observations deleted)
+    ---------  Creating shares and log differences ---------
+(640 missing values generated)
+(640 missing values generated)
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+       share |     34,112    .0011815    .0049382   6.52e-07   .2551256
+within_share |     34,752    .0087745    .0193209          0   .4740109
+outside_sh~e |     34,752    .9912255    .0193209   .5259891          1
+log_diff_s~s |     34,112   -8.339124     1.90229  -14.21078  -.7235245
+    ---------  Writing data to output file ---------
+(file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000p not found)
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000p saved as .dta format
+           Appending 2006Q2 data to existing file...
+(encoding automatically selected: ISO-8859-1)
+(33 vars, 164,088 obs)
+(variable carrier was str2, now str4 to accommodate using data's values)
+(variable total_passengers was long, now double to accommodate using data's values)
+(variable market_size was float, now double to accommodate using data's values)
+(variable origin_hub was byte, now float to accommodate using data's values)
+(variable destination_hub was byte, now float to accommodate using data's values)
+(variable destination_vacation was byte, now float to accommodate using data's values)
+(variable average_distance was float, now double to accommodate using data's values)
+(variable average_nonstop_miles was float, now double to accommodate using data's values)
+(variable average_fare was float, now double to accommodate using data's values)
+(variable average_extra_miles was float, now double to accommodate using data's values)
+(variable market was str11, now str25 to accommodate using data's values)
+(variable time was str6, now str25 to accommodate using data's values)
+(variable major was byte, now float to accommodate using data's values)
+(variable legacy was byte, now float to accommodate using data's values)
+(variable lcc was byte, now float to accommodate using data's values)
+(variable num_markets was int, now float to accommodate using data's values)
+(variable total_presence was float, now double to accommodate using data's values)
+(variable total_num_markets was int, now double to accommodate using data's values)
+(variable average_presence_rival was float, now double to accommodate using data's values)
+(variable average_num_markets_rival was float, now double to accommodate using data's values)
+(variable rival_carriers was byte, now int to accommodate using data's values)
+(variable share was float, now double to accommodate using data's values)
+(variable within_share was float, now double to accommodate using data's values)
+(variable log_diff_shares was float, now double to accommodate using data's values)
+file ./data/processed/combined/airline_data.csv saved
+           Successfully wrote 2006Q2 data to ./data/processed/combined/airline_data.csv
+--------------------------------- Processing 2006 Q3 --------------------------------------
+(encoding automatically selected: UTF-8)
+(15 vars, 5,139,735 obs)
+(266,545 observations deleted)
+(321,451 observations deleted)
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000r saved as .dta format
+    ---------  Filtering CONUS airports ---------
+(variable originairportid was int, now long to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                       151,321
+        from master                   151,321  
+        from using                          0  
+
+    Matched                         4,400,418  
+    -----------------------------------------
+(variable destairportid was int, now long to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                       147,712
+        from master                   147,712  
+        from using                          0  
+
+    Matched                         4,404,027  
+    -----------------------------------------
+(865,726 observations deleted)
+    ---------  Filtering slot-controlled airports ---------
+(variable airport_id was float, now double to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,686,013  
+    -----------------------------------------
+(0 real changes made)
+(3,686,013 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,686,013  
+    -----------------------------------------
+(0 real changes made)
+    ---------  Merging destination vacation flags ---------
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,686,013  
+    -----------------------------------------
+(0 real changes made)
+    ---------  Merging airport populations ---------
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                        23,604
+        from master                    23,604  
+        from using                          0  
+
+    Matched                         3,662,409  
+    -----------------------------------------
+(0 real changes made)
+(3,686,013 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                        22,898
+        from master                    22,898  
+        from using                          0  
+
+    Matched                         3,663,115  
+    -----------------------------------------
+(0 real changes made)
+(45,698 missing values generated)
+    ---------  Merging hub indicators ---------
+(variable airport_id was float, now double to accommodate using data's values)
+(variable carrier was str2, now str4 to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                     3,686,013
+        from master                 3,686,013  
+        from using                          0  
+
+    Matched                                 0  
+    -----------------------------------------
+(3,686,013 real changes made)
+(3,686,013 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                     3,686,013
+        from master                 3,686,013  
+        from using                          0  
+
+    Matched                                 0  
+    -----------------------------------------
+(3,686,013 real changes made)
+    ---------  Aggregating to (O-D-carrier-quarter) ---------
+               Data collapsed to (O-D-carrier-quarter) level successfully, obs: 34827
+    ---------  Creating identifiers ---------
+origin_str generated as str5
+dest_str generated as str5
+year_str generated as str4
+quarter_str generated as str1
+    ---------  Creating carrier flags ---------
+
+. // -----------------------------------------------------------------------------
+. // * File:    processing_data.do
+. // * Purpose: Contains logit to create major carrier flags
+. // *          and carrier type classifications
+. // -----------------------------------------------------------------------------
+. 
+. gen major = 0
+
+. 
+. // Use inlist()  does not allowed more than 10 itemrms
+. replace major = 1 if year==2019 & inlist(carrier,"AS","G4","AA","5Y","DL","MQ","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2019 & inlist(carrier,"B6","RC","OO","WN","NK","UA")
+(0 real changes made)
+
+. replace major = 1 if year==2018 & inlist(carrier,"AS","G4","AA","5Y","DL","MQ","EV","F9")
+(0 real changes made)
+
+. replace major = 1 if year==2018 & inlist(carrier,"HA","B6","OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2017 & inlist(carrier,"AS","G4","AA","5Y","DL","F9","HA","B6")
+(0 real changes made)
+
+. replace major = 1 if year==2017 & inlist(carrier,"OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2016 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2016 & inlist(carrier,"B6","OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2015 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2015 & inlist(carrier,"B6","OO","WN","NK","UA","US","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2014 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2014 & inlist(carrier,"B6","OO","WN","NK","UA","US","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"8C","AS","AA","MQ","5Y","DL","EV","F9")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"HA","B6","K4","OO","WN","NK","UA","US")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"VX","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2012 & inlist(carrier,"8C","AS","AA","MQ","5Y","DL","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2012 & inlist(carrier,"B6","K4","OO","WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2011 & inlist(carrier,"8C","AS","AA","MQ","5Y","CO","CS","DL")
+(0 real changes made)
+
+. replace major = 1 if year==2011 & inlist(carrier,"F9","HA","B6","OO","WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"CO","DO","F9","HA","B6","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"CO","DL","F9","HA","B6","YV","NW","OO")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"CO","DL","F9","B6","YV","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"GB","8C","AS","AA","MQ","HP","EV","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"CO","DL","F9","B6","YV","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"GB","8C","AS","AA","MQ","TZ","HP","EV")
+(7,042 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"OH","CO","DL","B6","NW","OO","WN","UA")
+(20,273 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"US","WO")
+(3,828 real changes made)
+
+. replace major = 1 if year==2005 & inlist(carrier,"AS","AA","MQ","TZ","HP","OH","CO","EV")
+(0 real changes made)
+
+. replace major = 1 if year==2005 & inlist(carrier,"DL","B6","NW","WN","UA","US","WO")
+(0 real changes made)
+
+. 
+. // Create carrier type classifications
+. gen legacy = 0
+
+. gen lcc = 0
+
+. 
+. // Legacy carriers (traditional full-service carriers)
+. replace legacy = 1 if inlist(carrier,"AS","AQ","AA","CO","DL")
+(13,552 real changes made)
+
+. replace legacy = 1 if inlist(carrier,"HA","NW","TW","UA","US")
+(12,444 real changes made)
+
+. 
+. // Low-cost carriers
+. replace lcc = 1 if inlist(carrier,"TZ","F9","YV","DH","B6","YX","SX","XP","WN")
+(4,935 real changes made)
+
+. replace lcc = 1 if inlist(carrier,"NK","SY","U5","VC")
+(226 real changes made)
+
+. 
+. 
+. di as text "    Major carrier flags and carrier type classifications created successfully."
+    Major carrier flags and carrier type classifications created successfully.
+
+. 
+end of do-file
+    ---------  Creating rival stats ---------
+(0 real changes made)
+(160 missing values generated)
+(160 missing values generated)
+(160 observations deleted)
+    ---------  Creating shares and log differences ---------
+(523 missing values generated)
+(523 missing values generated)
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+       share |     34,144    .0011431    .0053621   6.52e-07   .3012197
+within_share |     34,667    .0085667    .0207875          0   .5339167
+outside_sh~e |     34,667    .9914333    .0207875   .4660833          1
+log_diff_s~s |     34,144   -8.367134    1.883492  -14.21202  -.4365242
+    ---------  Writing data to output file ---------
+(file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000s not found)
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000s saved as .dta format
+           Appending 2006Q3 data to existing file...
+(encoding automatically selected: ISO-8859-1)
+(33 vars, 198,840 obs)
+(variable carrier was str2, now str4 to accommodate using data's values)
+(variable total_passengers was long, now double to accommodate using data's values)
+(variable market_size was float, now double to accommodate using data's values)
+(variable origin_hub was byte, now float to accommodate using data's values)
+(variable destination_hub was byte, now float to accommodate using data's values)
+(variable destination_vacation was byte, now float to accommodate using data's values)
+(variable average_distance was float, now double to accommodate using data's values)
+(variable average_nonstop_miles was float, now double to accommodate using data's values)
+(variable average_fare was float, now double to accommodate using data's values)
+(variable average_extra_miles was float, now double to accommodate using data's values)
+(variable market was str11, now str25 to accommodate using data's values)
+(variable time was str6, now str25 to accommodate using data's values)
+(variable major was byte, now float to accommodate using data's values)
+(variable legacy was byte, now float to accommodate using data's values)
+(variable lcc was byte, now float to accommodate using data's values)
+(variable num_markets was int, now float to accommodate using data's values)
+(variable total_presence was float, now double to accommodate using data's values)
+(variable total_num_markets was int, now double to accommodate using data's values)
+(variable average_presence_rival was float, now double to accommodate using data's values)
+(variable average_num_markets_rival was float, now double to accommodate using data's values)
+(variable rival_carriers was byte, now int to accommodate using data's values)
+(variable share was float, now double to accommodate using data's values)
+(variable within_share was float, now double to accommodate using data's values)
+(variable log_diff_shares was float, now double to accommodate using data's values)
+file ./data/processed/combined/airline_data.csv saved
+           Successfully wrote 2006Q3 data to ./data/processed/combined/airline_data.csv
+--------------------------------- Processing 2006 Q4 --------------------------------------
+(encoding automatically selected: UTF-8)
+(15 vars, 5,141,974 obs)
+(249,873 observations deleted)
+(284,997 observations deleted)
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000u saved as .dta format
+    ---------  Filtering CONUS airports ---------
+(variable originairportid was int, now long to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                       141,396
+        from master                   141,396  
+        from using                          0  
+
+    Matched                         4,465,708  
+    -----------------------------------------
+(variable destairportid was int, now long to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                       140,433
+        from master                   140,433  
+        from using                          0  
+
+    Matched                         4,466,671  
+    -----------------------------------------
+(858,470 observations deleted)
+    ---------  Filtering slot-controlled airports ---------
+(variable airport_id was float, now double to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,748,634  
+    -----------------------------------------
+(0 real changes made)
+(3,748,634 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,748,634  
+    -----------------------------------------
+(0 real changes made)
+    ---------  Merging destination vacation flags ---------
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,748,634  
+    -----------------------------------------
+(0 real changes made)
+    ---------  Merging airport populations ---------
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                        29,973
+        from master                    29,973  
+        from using                          0  
+
+    Matched                         3,718,661  
+    -----------------------------------------
+(0 real changes made)
+(3,748,634 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                        29,564
+        from master                    29,564  
+        from using                          0  
+
+    Matched                         3,719,070  
+    -----------------------------------------
+(0 real changes made)
+(58,454 missing values generated)
+    ---------  Merging hub indicators ---------
+(variable airport_id was float, now double to accommodate using data's values)
+(variable carrier was str2, now str4 to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                     3,748,634
+        from master                 3,748,634  
+        from using                          0  
+
+    Matched                                 0  
+    -----------------------------------------
+(3,748,634 real changes made)
+(3,748,634 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                     3,748,634
+        from master                 3,748,634  
+        from using                          0  
+
+    Matched                                 0  
+    -----------------------------------------
+(3,748,634 real changes made)
+    ---------  Aggregating to (O-D-carrier-quarter) ---------
+               Data collapsed to (O-D-carrier-quarter) level successfully, obs: 34603
+    ---------  Creating identifiers ---------
+origin_str generated as str5
+dest_str generated as str5
+year_str generated as str4
+quarter_str generated as str1
+    ---------  Creating carrier flags ---------
+
+. // -----------------------------------------------------------------------------
+. // * File:    processing_data.do
+. // * Purpose: Contains logit to create major carrier flags
+. // *          and carrier type classifications
+. // -----------------------------------------------------------------------------
+. 
+. gen major = 0
+
+. 
+. // Use inlist()  does not allowed more than 10 itemrms
+. replace major = 1 if year==2019 & inlist(carrier,"AS","G4","AA","5Y","DL","MQ","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2019 & inlist(carrier,"B6","RC","OO","WN","NK","UA")
+(0 real changes made)
+
+. replace major = 1 if year==2018 & inlist(carrier,"AS","G4","AA","5Y","DL","MQ","EV","F9")
+(0 real changes made)
+
+. replace major = 1 if year==2018 & inlist(carrier,"HA","B6","OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2017 & inlist(carrier,"AS","G4","AA","5Y","DL","F9","HA","B6")
+(0 real changes made)
+
+. replace major = 1 if year==2017 & inlist(carrier,"OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2016 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2016 & inlist(carrier,"B6","OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2015 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2015 & inlist(carrier,"B6","OO","WN","NK","UA","US","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2014 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2014 & inlist(carrier,"B6","OO","WN","NK","UA","US","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"8C","AS","AA","MQ","5Y","DL","EV","F9")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"HA","B6","K4","OO","WN","NK","UA","US")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"VX","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2012 & inlist(carrier,"8C","AS","AA","MQ","5Y","DL","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2012 & inlist(carrier,"B6","K4","OO","WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2011 & inlist(carrier,"8C","AS","AA","MQ","5Y","CO","CS","DL")
+(0 real changes made)
+
+. replace major = 1 if year==2011 & inlist(carrier,"F9","HA","B6","OO","WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"CO","DO","F9","HA","B6","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"CO","DL","F9","HA","B6","YV","NW","OO")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"CO","DL","F9","B6","YV","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"GB","8C","AS","AA","MQ","HP","EV","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"CO","DL","F9","B6","YV","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"GB","8C","AS","AA","MQ","TZ","HP","EV")
+(6,967 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"OH","CO","DL","B6","NW","OO","WN","UA")
+(20,157 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"US","WO")
+(3,885 real changes made)
+
+. replace major = 1 if year==2005 & inlist(carrier,"AS","AA","MQ","TZ","HP","OH","CO","EV")
+(0 real changes made)
+
+. replace major = 1 if year==2005 & inlist(carrier,"DL","B6","NW","WN","UA","US","WO")
+(0 real changes made)
+
+. 
+. // Create carrier type classifications
+. gen legacy = 0
+
+. gen lcc = 0
+
+. 
+. // Legacy carriers (traditional full-service carriers)
+. replace legacy = 1 if inlist(carrier,"AS","AQ","AA","CO","DL")
+(13,418 real changes made)
+
+. replace legacy = 1 if inlist(carrier,"HA","NW","TW","UA","US")
+(12,418 real changes made)
+
+. 
+. // Low-cost carriers
+. replace lcc = 1 if inlist(carrier,"TZ","F9","YV","DH","B6","YX","SX","XP","WN")
+(4,966 real changes made)
+
+. replace lcc = 1 if inlist(carrier,"NK","SY","U5","VC")
+(237 real changes made)
+
+. 
+. 
+. di as text "    Major carrier flags and carrier type classifications created successfully."
+    Major carrier flags and carrier type classifications created successfully.
+
+. 
+end of do-file
+    ---------  Creating rival stats ---------
+(0 real changes made)
+(154 missing values generated)
+(154 missing values generated)
+(154 observations deleted)
+    ---------  Creating shares and log differences ---------
+(633 missing values generated)
+(633 missing values generated)
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+       share |     33,816    .0011796    .0056491   6.52e-07   .3072392
+within_share |     34,449    .0087794    .0229799          0   .6011614
+outside_sh~e |     34,449    .9912206    .0229799   .3988386          1
+log_diff_s~s |     33,816   -8.364847    1.874115  -14.21254  -.2729524
+    ---------  Writing data to output file ---------
+(file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000v not found)
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000v saved as .dta format
+           Appending 2006Q4 data to existing file...
+(encoding automatically selected: ISO-8859-1)
+(33 vars, 233,507 obs)
+(variable carrier was str2, now str4 to accommodate using data's values)
+(variable total_passengers was long, now double to accommodate using data's values)
+(variable market_size was float, now double to accommodate using data's values)
+(variable origin_hub was byte, now float to accommodate using data's values)
+(variable destination_hub was byte, now float to accommodate using data's values)
+(variable destination_vacation was byte, now float to accommodate using data's values)
+(variable average_distance was float, now double to accommodate using data's values)
+(variable average_nonstop_miles was float, now double to accommodate using data's values)
+(variable average_fare was float, now double to accommodate using data's values)
+(variable average_extra_miles was float, now double to accommodate using data's values)
+(variable market was str11, now str25 to accommodate using data's values)
+(variable time was str6, now str25 to accommodate using data's values)
+(variable major was byte, now float to accommodate using data's values)
+(variable legacy was byte, now float to accommodate using data's values)
+(variable lcc was byte, now float to accommodate using data's values)
+(variable num_markets was int, now float to accommodate using data's values)
+(variable total_presence was float, now double to accommodate using data's values)
+(variable total_num_markets was int, now double to accommodate using data's values)
+(variable average_presence_rival was float, now double to accommodate using data's values)
+(variable average_num_markets_rival was float, now double to accommodate using data's values)
+(variable rival_carriers was byte, now int to accommodate using data's values)
+(variable share was float, now double to accommodate using data's values)
+(variable within_share was float, now double to accommodate using data's values)
+(variable log_diff_shares was float, now double to accommodate using data's values)
+file ./data/processed/combined/airline_data.csv saved
+           Successfully wrote 2006Q4 data to ./data/processed/combined/airline_data.csv
+(25 observations deleted)
+--------------------------------- Processing 2007 Q1 --------------------------------------
+(encoding automatically selected: UTF-8)
+(15 vars, 4,795,202 obs)
+(239,000 observations deleted)
+(267,207 observations deleted)
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.00000x saved as .dta format
+    ---------  Filtering CONUS airports ---------
+(variable originairportid was int, now long to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                       138,433
+        from master                   138,433  
+        from using                          0  
+
+    Matched                         4,150,562  
+    -----------------------------------------
+(variable destairportid was int, now long to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                       136,230
+        from master                   136,230  
+        from using                          0  
+
+    Matched                         4,152,765  
+    -----------------------------------------
+(802,223 observations deleted)
+    ---------  Filtering slot-controlled airports ---------
+(variable airport_id was float, now double to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,486,772  
+    -----------------------------------------
+(0 real changes made)
+(3,486,772 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,486,772  
+    -----------------------------------------
+(0 real changes made)
+    ---------  Merging destination vacation flags ---------
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                             0
+    Matched                         3,486,772  
+    -----------------------------------------
+(0 real changes made)
+    ---------  Merging airport populations ---------
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                        32,425
+        from master                    32,425  
+        from using                          0  
+
+    Matched                         3,454,347  
+    -----------------------------------------
+(0 real changes made)
+(3,486,772 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                        31,260
+        from master                    31,260  
+        from using                          0  
+
+    Matched                         3,455,512  
+    -----------------------------------------
+(0 real changes made)
+(63,066 missing values generated)
+    ---------  Merging hub indicators ---------
+(variable airport_id was float, now double to accommodate using data's values)
+(variable carrier was str2, now str4 to accommodate using data's values)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                     3,486,772
+        from master                 3,486,772  
+        from using                          0  
+
+    Matched                                 0  
+    -----------------------------------------
+(3,486,772 real changes made)
+(3,486,772 real changes made)
+
+    Result                      Number of obs
+    -----------------------------------------
+    Not matched                     3,486,772
+        from master                 3,486,772  
+        from using                          0  
+
+    Matched                                 0  
+    -----------------------------------------
+(3,486,772 real changes made)
+    ---------  Aggregating to (O-D-carrier-quarter) ---------
+               Data collapsed to (O-D-carrier-quarter) level successfully, obs: 33046
+    ---------  Creating identifiers ---------
+origin_str generated as str5
+dest_str generated as str5
+year_str generated as str4
+quarter_str generated as str1
+    ---------  Creating carrier flags ---------
+
+. // -----------------------------------------------------------------------------
+. // * File:    processing_data.do
+. // * Purpose: Contains logit to create major carrier flags
+. // *          and carrier type classifications
+. // -----------------------------------------------------------------------------
+. 
+. gen major = 0
+
+. 
+. // Use inlist()  does not allowed more than 10 itemrms
+. replace major = 1 if year==2019 & inlist(carrier,"AS","G4","AA","5Y","DL","MQ","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2019 & inlist(carrier,"B6","RC","OO","WN","NK","UA")
+(0 real changes made)
+
+. replace major = 1 if year==2018 & inlist(carrier,"AS","G4","AA","5Y","DL","MQ","EV","F9")
+(0 real changes made)
+
+. replace major = 1 if year==2018 & inlist(carrier,"HA","B6","OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2017 & inlist(carrier,"AS","G4","AA","5Y","DL","F9","HA","B6")
+(0 real changes made)
+
+. replace major = 1 if year==2017 & inlist(carrier,"OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2016 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2016 & inlist(carrier,"B6","OO","WN","NK","UA","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2015 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2015 & inlist(carrier,"B6","OO","WN","NK","UA","US","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2014 & inlist(carrier,"AS","AA","5Y","DL","MQ","EV","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2014 & inlist(carrier,"B6","OO","WN","NK","UA","US","VX")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"8C","AS","AA","MQ","5Y","DL","EV","F9")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"HA","B6","K4","OO","WN","NK","UA","US")
+(0 real changes made)
+
+. replace major = 1 if year==2013 & inlist(carrier,"VX","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2012 & inlist(carrier,"8C","AS","AA","MQ","5Y","DL","F9","HA")
+(0 real changes made)
+
+. replace major = 1 if year==2012 & inlist(carrier,"B6","K4","OO","WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2011 & inlist(carrier,"8C","AS","AA","MQ","5Y","CO","CS","DL")
+(0 real changes made)
+
+. replace major = 1 if year==2011 & inlist(carrier,"F9","HA","B6","OO","WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"CO","DO","F9","HA","B6","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2010 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"CO","DL","F9","HA","B6","YV","NW","OO")
+(0 real changes made)
+
+. replace major = 1 if year==2009 & inlist(carrier,"WN","UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"GB","8C","AS","AA","MQ","EV","5Y","OH")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"CO","DL","F9","B6","YV","NW","OO","WN")
+(0 real changes made)
+
+. replace major = 1 if year==2008 & inlist(carrier,"UA","US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"GB","8C","AS","AA","MQ","HP","EV","OH")
+(6,302 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"CO","DL","F9","B6","YV","NW","OO","WN")
+(16,016 real changes made)
+
+. replace major = 1 if year==2007 & inlist(carrier,"UA","US","WO")
+(7,877 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"GB","8C","AS","AA","MQ","TZ","HP","EV")
+(0 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"OH","CO","DL","B6","NW","OO","WN","UA")
+(0 real changes made)
+
+. replace major = 1 if year==2006 & inlist(carrier,"US","WO")
+(0 real changes made)
+
+. replace major = 1 if year==2005 & inlist(carrier,"AS","AA","MQ","TZ","HP","OH","CO","EV")
+(0 real changes made)
+
+. replace major = 1 if year==2005 & inlist(carrier,"DL","B6","NW","WN","UA","US","WO")
+(0 real changes made)
+
+. 
+. // Create carrier type classifications
+. gen legacy = 0
+
+. gen lcc = 0
+
+. 
+. // Legacy carriers (traditional full-service carriers)
+. replace legacy = 1 if inlist(carrier,"AS","AQ","AA","CO","DL")
+(12,655 real changes made)
+
+. replace legacy = 1 if inlist(carrier,"HA","NW","TW","UA","US")
+(11,767 real changes made)
+
+. 
+. // Low-cost carriers
+. replace lcc = 1 if inlist(carrier,"TZ","F9","YV","DH","B6","YX","SX","XP","WN")
+(4,991 real changes made)
+
+. replace lcc = 1 if inlist(carrier,"NK","SY","U5","VC")
+(241 real changes made)
+
+. 
+. 
+. di as text "    Major carrier flags and carrier type classifications created successfully."
+    Major carrier flags and carrier type classifications created successfully.
+
+. 
+end of do-file
+    ---------  Creating rival stats ---------
+(0 real changes made)
+(162 missing values generated)
+(162 missing values generated)
+(162 observations deleted)
+    ---------  Creating shares and log differences ---------
+(706 missing values generated)
+(706 missing values generated)
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+       share |     32,178    .0011697    .0058676   6.53e-07   .3115631
+within_share |     32,884    .0086778    .0235141          0   .6129332
+outside_sh~e |     32,884    .9913222    .0235141   .3870668          1
+log_diff_s~s |     32,178   -8.432918    1.910908   -14.2174  -.2169954
+    ---------  Writing data to output file ---------
+(file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.000010 not found)
+file /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T//S_01666.000010 saved as .dta format
+           Appending 2007Q1 data to existing file...
+(encoding automatically selected: ISO-8859-1)
+(33 vars, 267,956 obs)
+(variable carrier was str2, now str4 to accommodate using data's values)
+(variable total_passengers was long, now double to accommodate using data's values)
+(variable market_size was float, now double to accommodate using data's values)
+(variable origin_hub was byte, now float to accommodate using data's values)
+(variable destination_hub was byte, now float to accommodate using data's values)
+(variable destination_vacation was byte, now float to accommodate using data's values)
+(variable average_distance was float, now double to accommodate using data's values)
+(variable average_nonstop_miles was float, now double to accommodate using data's values)
+(variable average_fare was float, now double to accommodate using data's values)
+(variable average_extra_miles was float, now double to accommodate using data's values)
+(variable market was str11, now str25 to accommodate using data's values)
+(variable time was str6, now str25 to accommodate using data's values)
+(variable major was byte, now float to accommodate using data's values)
+(variable legacy was byte, now float to accommodate using data's values)
+(variable lcc was byte, now float to accommodate using data's values)
+(variable num_markets was int, now float to accommodate using data's values)
+(variable total_presence was float, now double to accommodate using data's values)
+(variable total_num_markets was int, now double to accommodate using data's values)
+(variable average_presence_rival was float, now double to accommodate using data's values)
+(variable average_num_markets_rival was float, now double to accommodate using data's values)
+(variable rival_carriers was byte, now int to accommodate using data's values)
+(variable share was float, now double to accommodate using data's values)
+(variable within_share was float, now double to accommodate using data's values)
+(variable log_diff_shares was float, now double to accommodate using data's values)
+file ./data/processed/combined/airline_data.csv saved
+           Successfully wrote 2007Q1 data to ./data/processed/combined/airline_data.csv
+--------------------------------- Processing 2007 Q2 --------------------------------------
+(encoding automatically selected: UTF-8)

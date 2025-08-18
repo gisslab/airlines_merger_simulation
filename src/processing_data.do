@@ -14,6 +14,7 @@
 
 // ---------------------- PATHS (EDIT THESE ONLY) -------------------------------
 pwd
+
 // if in my laptop:
 cd "/Users/gisellelab/Work/airlines_merger_simulation"   // <-- adjust this, then run the do-file , My path is 
 
@@ -24,8 +25,12 @@ global PROC_DB1B      "./data/processed/db1b_market/"              // processed 
 global PROC_OTHER    "./data/processed/other/"                // processed auxiliaries
 global OUT_DIR       "./data/processed/combined/"              // output folder
 global OUT_FILE      "${OUT_DIR}airline_data.csv"              // final CSV
+global CODE_DIR      "./src/"                                   // source code directory
 
 // If the output dir doesn’t exist, Stata will create on first export
+
+log using "${CODE_DIR}logs/processing_data.log", replace
+
 
 // ---------------------- PARAMETERS -------------------------------------------
 global YEARS   "2005/2019"
@@ -392,3 +397,5 @@ di as yellow "------------------------------------ Processing DB1B Market data -
     }
 
 di as result "Done. Wrote: ${OUT_FILE}"
+
+log close
