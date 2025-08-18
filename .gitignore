@@ -46,8 +46,6 @@ venv.bak/
 *.dta~
 *.smcl
 *.gph
-*.log
 *.ster
 *.stsem
-*.do~
 *.ado~
