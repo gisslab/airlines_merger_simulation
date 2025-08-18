@@ -10,7 +10,7 @@ This project estimates demand and simulates the merger process between airlines.
 - data/: Input data files (airline data, routes, financial data)
     - raw/: Raw data from sources
     - processed/: Processed data from functions
-- doc/: Useful documentation and screenshots for help.
+- doc/: Useful documentation and screenshots for running example and outputs.  
 - secured_keys/: This folder must contain a JSON file (api_keys.json) used to access FRED and Census if necessary. 
 
 ## PROGRESS AND RUNNING ORDER:
