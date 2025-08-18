@@ -158,13 +158,11 @@ def get_cpi_index(base_year: int = 2008,
     return cpi_index
 
 
-
 def _is_gzip(path: str) -> bool:
     """Return True if file starts with GZIP magic bytes (1F 8B)."""
     with open(path, 'rb') as f:
         head = f.read(2)
     return head == b'\x1f\x8b'
-
 
 def _load_r_file(path: str) -> pd.DataFrame:
     """

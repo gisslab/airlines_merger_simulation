@@ -405,14 +405,7 @@ def main(args: Optional[List[str]] = None) -> None:
     ancillary = load_ancillary_data(parsed.data_dir)
 
     # At this point I could merge the DB1B market files with the ancillary -> do this on Stata
-    # datasets using pandas.  For example:
-    #
-    # for csv_path in sorted(glob.glob(os.path.join(parsed.out_dir, 'db1b_market_*.csv'))):
-    #     df = pd.read_csv(csv_path)
-    #     df = df.merge(ancillary['city_market_lookup'], left_on='OriginCityMarketID', right_on='CITY_MARKET_ID', how='left')
-    #     # Additional merges and transformations here
-    #     df.to_csv(csv_path.replace('.csv', '_enriched.csv'), index=False)
-    #
+
     print("\033[1;34mProcessing complete. -------------------------------------------------------------------------- \033[0m")
 
 
