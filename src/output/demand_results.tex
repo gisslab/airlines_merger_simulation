@@ -1,0 +1,32 @@
+\begin{table}[htbp]\centering
+\def\sym#1{\ifmmode^{#1}\else\(^{#1}\)\fi}
+\caption{Demand Estimates (Logit and Nested-Logit)}
+\begin{tabular}{l*{4}{c}}
+\toprule
+                    &\multicolumn{1}{c}{(1)}&\multicolumn{1}{c}{(2)}&\multicolumn{1}{c}{(3)}&\multicolumn{1}{c}{(4)}\\
+                    &\multicolumn{1}{c}{ln(s\_jt) - ln(s\_0t)}&\multicolumn{1}{c}{ln(s\_jt) - ln(s\_0t)}&\multicolumn{1}{c}{ln(s\_jt) - ln(s\_0t)}&\multicolumn{1}{c}{ln(s\_jt) - ln(s\_0t)}\\
+\midrule
+Average ticket price&     -0.0024\sym{***}&      0.0318\sym{***}&     -0.0004\sym{***}&     -0.0019\sym{***}\\
+                    &    (0.0000)         &    (0.0004)         &    (0.0000)         &    (0.0001)         \\
+\addlinespace
+Share nonstop flights &      1.9793\sym{***}&      1.8355\sym{***}&      0.0946\sym{***}&      0.3154\sym{***}\\
+                    &    (0.0053)         &    (0.0130)         &    (0.0009)         &    (0.0043)         \\
+\addlinespace
+Average Distance (000s miles)&     -4.1108\sym{***}&     -5.6862\sym{***}&     -0.0442\sym{***}&     -0.4475\sym{***}\\
+                    &    (0.0159)         &    (0.0692)         &    (0.0024)         &    (0.0153)         \\
+\addlinespace
+Average Distance sqr (000s miles)&      0.2929\sym{***}&      0.1273\sym{***}&      0.0046\sym{***}&      0.0440\sym{***}\\
+                    &    (0.0038)         &    (0.0174)         &    (0.0005)         &    (0.0014)         \\
+\addlinespace
+Log(1 + fringe carriers)&     -0.4908\sym{***}&     -0.1865\sym{***}&      0.0702\sym{***}&     -0.0056\sym{***}\\
+                    &    (0.0037)         &    (0.0083)         &    (0.0006)         &    (0.0010)         \\
+\addlinespace
+ln(s\_jt) - ln(s\_gt) &                     &                     &      0.9809\sym{***}&      0.8688\sym{***}\\
+                    &                     &                     &    (0.0002)         &    (0.0024)         \\
+\midrule
+Observations        &     1371742         &     1371742         &     1371742         &     1371742         \\
+Adjusted \(R^{2}\)  &       0.486         &      -1.674         &       0.985         &       0.973         \\
+F-statistic (IV)    &                     &   3738.9612         &                     &    422.5438         \\
+\bottomrule
+\end{tabular}
+\end{table}
