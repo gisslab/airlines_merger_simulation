@@ -59,16 +59,13 @@ global PROC_DATA    "./data/processed/combined/"                // processed dat
 global CODE_DIR      "./src/"                         
 global OUT      "./src/output/"              // output folder          // source code directory
 
-// If the output dir doesn’t exist, Stata will create on first export
-
-// log close
-// log using "${CODE_DIR}logs/demand_estimation.log", replace
+cap log close
+log using "${CODE_DIR}logs/demand_estimation.log", replace
 
 // ---------------------- PARAMETERS -------------------------------------------
 global YEARS   "2005/2019"
 global QUARTERS "1 2 3 4"
 global TYPE     "Market"   // DB1B “Market”
-
 
 di as yellow "--------------------------------------------------------------------------------------------------"
 di as yellow "----------------------------------- Running demand_estimation.do --------------------------------"
@@ -280,7 +277,7 @@ di as yellow "    ---------  Running IV logit (price endogenous) ---------"
 cap which ivreghdfe
 if _rc ssc install ivreghdfe, replace
 ivreghdfe lns_minus_lno (`var_fare' = `Z_core') `X_exog', ///
-    absorb(`FE') first savefirst savefprefix(fs_)  vce(robust) // vce(cluster `CL')
+    absorb(`FE') first savefirst savefp(fsiv_)  vce(robust) // vce(cluster `CL')
 
 * Store F-statistic from first stage
 scalar F_stat_IV = e(widstat)
@@ -309,7 +306,7 @@ estimates store NL_OLS
 di as yellow "    ---------  Running IV nested-logit (price and ln(s_jt|g) endogenous) ---------"
 
 ivreghdfe lns_minus_lno (`var_nest' `var_fare' = `Z_core') `X_exog', ///
-    absorb(`FE')  first savefirst savefprefix(fs_)  vce(robust)
+    absorb(`FE')  first savefirst savefp(fsivn_)  vce(robust)
 
 * Store F-statistic from first stage
 scalar F_stat_IV_NL = e(widstat)
@@ -321,6 +318,15 @@ estimates store IV_NL
 *-------------------------*
 * COLLECT & EXPORT TABLE *
 *-------------------------*
+
+// export also first stage results for IV nested-logit
+
+esttab  fsivn_`var_fare' using "$OUT/demand_results_fs_fare.tex", replace ///
+    b(4) se(4) label booktabs se star(* 0.10 ** 0.05 *** 0.01)
+
+esttab fsivn_`var_nest' using "$OUT/demand_results_fs_nest.tex", replace ///
+    b(4) se(4) label booktabs se star(* 0.10 ** 0.05 *** 0.01)
+
 cap which esttab
 esttab OLS IV NL_OLS IV_NL using "$OUT/demand_results.tex", replace ///
     b(4) se(4) ar2  label booktabs se star(* 0.10 ** 0.05 *** 0.01) ///

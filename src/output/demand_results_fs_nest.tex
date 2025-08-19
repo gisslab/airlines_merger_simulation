@@ -1,0 +1,34 @@
+{
+\def\sym#1{\ifmmode^{#1}\else\(^{#1}\)\fi}
+\begin{tabular}{l*{1}{c}}
+\toprule
+                    &\multicolumn{1}{c}{(1)}\\
+                    &\multicolumn{1}{c}{ln(s\_jt) - ln(s\_gt)}\\
+\midrule
+Average distance to rival markets&      0.0017\sym{***}\\
+                    &    (0.0000)         \\
+\addlinespace
+Average number of rival markets&     -0.0196\sym{***}\\
+                    &    (0.0002)         \\
+\addlinespace
+Number of rival carriers&     -0.2912\sym{***}\\
+                    &    (0.0012)         \\
+\addlinespace
+Share nonstop flights &      1.9116\sym{***}\\
+                    &    (0.0052)         \\
+\addlinespace
+Average Distance (000s miles)&     -3.8347\sym{***}\\
+                    &    (0.0130)         \\
+\addlinespace
+Average Distance sqr (000s miles)&      0.2512\sym{***}\\
+                    &    (0.0029)         \\
+\addlinespace
+Log(1 + fringe carriers)&     -0.0986\sym{***}\\
+                    &    (0.0042)         \\
+\midrule
+Observations        &     1371742         \\
+\bottomrule
+\multicolumn{2}{l}{\footnotesize Standard errors in parentheses}\\
+\multicolumn{2}{l}{\footnotesize \sym{*} \(p<0.10\), \sym{**} \(p<0.05\), \sym{***} \(p<0.01\)}\\
+\end{tabular}
+}

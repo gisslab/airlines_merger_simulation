@@ -2,7 +2,7 @@
       name:  <unnamed>
        log:  /Users/gisellelab/Work/airlines_merger_simulation/src/logs/demand_estimation.log
   log type:  text
- opened on:  19 Aug 2025, 15:21:09
+ opened on:  19 Aug 2025, 15:53:05
 
 . 
 . // ---------------------- PARAMETERS -------------------------------------------
@@ -12,7 +12,6 @@
 
 . global TYPE     "Market"   // DB1B “Market”
 
-. 
 . 
 . di as yellow "--------------------------------------------------------------------------------------------------"
 --------------------------------------------------------------------------------------------------
@@ -296,7 +295,7 @@
 
 . label var lns_minus_lng "ln(s_jt) - ln(s_gt)"
 
-. label var average_fare "Average ticket price"
+. label var average_fare "Average fare (dollars)"
 
 . label var logS "Log of market size"
 
@@ -307,6 +306,12 @@
 . label var dist_k2 "Average Distance sqr (000s miles)"
 
 . label var lnum_fringe "Log(1 + fringe carriers)"
+
+. label var fringe_carriers "Number of fringe carriers"
+
+. label var num_markets "Number of destinations served"
+
+. label var rival_carriers "Number of rival carriers"
 
 . label var lng_share "Log nest share"
 
@@ -319,6 +324,12 @@
 . label var s_gjt "Nest share"
 
 . label var lng_share "ln(s_gt)"
+
+. label var average_num_markets_rival "Average number of rival markets"
+
+. label var average_distance_rival "Average distance to rival markets"
+
+. label var average_presence_rival "Average presence of rival carriers"
 
 . // label var elast_logit "Own elasticity (logit)"
 . // label var elast_nlogit "Own elasticity (nested-logit)"
@@ -437,7 +448,7 @@ Absorbed degrees of freedom:
 . if _rc ssc install ivreghdfe, replace
 
 . ivreghdfe lns_minus_lno (`var_fare' = `Z_core') `X_exog', ///
->     absorb(`FE') first savefirst savefprefix(fs_)  vce(robust) // vce(cluster `CL')
+>     absorb(`FE') first savefirst savefp(fsiv_)  vce(robust) // vce(cluster `CL')
 (MWFE estimator converged in 1 iterations)
 
 Stored estimation results
@@ -446,7 +457,7 @@ Stored estimation results
              |           Dependent  Number of        
         Name | Command    variable     param.  Title 
 -------------+---------------------------------------------------------------------
-fs_average~e | ivreg2    average_fare       7  First-stage regression: average_fare
+fsiv_avera~e | ivreg2    average_fare       7  First-stage regression: average_fare
 -----------------------------------------------------------------------------------
 
 First-stage regressions
@@ -663,7 +674,7 @@ Absorbed degrees of freedom:
 
 . 
 . ivreghdfe lns_minus_lno (`var_nest' `var_fare' = `Z_core') `X_exog', ///
->     absorb(`FE')  first savefirst savefprefix(fs_)  vce(robust)
+>     absorb(`FE')  first savefirst savefp(fsivn_)  vce(robust)
 (MWFE estimator converged in 1 iterations)
 
 Stored estimation results
@@ -672,8 +683,8 @@ Stored estimation results
              |           Dependent  Number of        
         Name | Command    variable     param.  Title 
 -------------+----------------------------------------------------------------------
-fs_lns_min~g | ivreg2    lns_minus_~g       7  First-stage regression: lns_minus_lng
-fs_average~e | ivreg2    average_fare       7  First-stage regression: average_fare
+fsivn_lns_~g | ivreg2    lns_minus_~g       7  First-stage regression: lns_minus_lng
+fsivn_aver~e | ivreg2    average_fare       7  First-stage regression: average_fare
 ------------------------------------------------------------------------------------
 
 First-stage regressions
@@ -856,6 +867,19 @@ First-stage F-statistic (IV Nested-Logit): 422.54378
 . *-------------------------*
 . * COLLECT & EXPORT TABLE *
 . *-------------------------*
+. 
+. // export also first stage results for IV nested-logit
+. 
+. esttab  fsivn_`var_fare' using "$OUT/demand_results_fs_fare.tex", replace ///
+>     b(4) se(4) label booktabs se star(* 0.10 ** 0.05 *** 0.01)
+(output written to ./src/output//demand_results_fs_fare.tex)
+
+. 
+. esttab fsivn_`var_nest' using "$OUT/demand_results_fs_nest.tex", replace ///
+>     b(4) se(4) label booktabs se star(* 0.10 ** 0.05 *** 0.01)
+(output written to ./src/output//demand_results_fs_nest.tex)
+
+. 
 . cap which esttab
 
 . esttab OLS IV NL_OLS IV_NL using "$OUT/demand_results.tex", replace ///
@@ -959,5 +983,5 @@ Saved: ./src/output//elasticity_logit_histogram.pdf
       name:  <unnamed>
        log:  /Users/gisellelab/Work/airlines_merger_simulation/src/logs/demand_estimation.log
   log type:  text
- closed on:  19 Aug 2025, 15:22:24
+ closed on:  19 Aug 2025, 15:54:21
 --------------------------------------------------------------------------------------------------------------------------
