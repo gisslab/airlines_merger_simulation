@@ -1,0 +1,65 @@
+\documentclass{article}
+\usepackage[margin=0.7in]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{subcaption}
+
+\title{Demand Estimation Report}
+\author{Airlines Merger Simulation}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+This report presents the results of the demand estimation analysis conducted as part of the Airlines Merger Simulation project. The tables and figures included here summarize the key findings.
+
+The model specification follows a logit and nested-logit framework, where consumer utility is modeled as:
+\begin{itemize}
+    \item \textbf{Logit Model:} $\ln(s_{jt}) - \ln(s_{0t}) = \alpha p_{jt} + x_{jt} \beta + \xi_t + \xi_{jt} + \epsilon_{ijt}$
+    \item \textbf{Nested-Logit Model:} $\ln(s_{jt}) - \ln(s_{0t}) = \alpha p_{jt} + x_{jt} \beta + \sigma \ln(s_{jt|g}) + \xi_t + \xi_{jt} + \epsilon_{ijt}$
+\end{itemize}
+where:
+\begin{itemize}
+    \item $p_{jt}$ is the average fare (price).
+    \item $x_{jt}$ includes regressors such as share nonstop, average distance, squared distance, and log(1 + number of fringe carriers).
+    \item $\nu_t$ and $\xi_{jt}$ are fixed effects for origin-destination and product-level unobservables.
+    \item $s_{jt|g}$ is the share of product $j$ in group $g$.
+    \item $\sigma$ captures the nesting parameter in the nested-logit model.
+    \item Instruments ($z^D_{jt}$) include average rival presence, average number of markets served by rivals, and the number of rival carriers.
+\end{itemize}
+
+
+\section{Summary Statistics}
+
+
+\input{../src/output/demand_vars_stats.tex}
+
+\pagebreak
+\section{Demand Estimation Results}
+
+Column (1) presents the results of the logit model without instruments,
+while column (2) shows the logit model results with price instruments. 
+Column (3) shows the nested-logit model without instruments, and 
+column (4) presents the nested-logit model with instruments for both prices and nest shares.  The nests are defined as inside goods (carriers that are not the outside good) and outside good.
+All columns include fixed effects for origin-destination markets. Robust standard errors are reported in parentheses below the coefficients.
+
+
+%The coefficients are interpreted as elasticities, with standard errors clustered at the market level.
+\input{../src/output/demand_results.tex}
+
+\section{Elasticities}
+\centering
+
+\input{../src/output/demand_elasticities.tex}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\textwidth]{../src/output/elasticity_logit_histogram.pdf}
+    \caption{Histogram of Elasticities}
+\end{figure}
+
+\end{document}
