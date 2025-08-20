@@ -95,7 +95,7 @@ local var_fringe   "fringe_carriers"        // fringe_carriers: number of rival 
 * Rival-based instruments (matching processing_data.do variable names)
 local iv_rivaldist   "average_distance_rival" // average distance rival (for IV)
 local iv_rivalpres   "average_presence_rival" // average presence rival (for IV)
-local iv_rivalmkts   "average_num_markets_rival" // avg_num_destinations_rival 
+local iv_rivalmkts   "average_num_destinations_rival" // options: average_num_destinations_rival average_num_markets_rival
 local iv_numrivals   "rival_carriers"
 
 *-------------------------*
@@ -134,19 +134,21 @@ egen long product_id = group(`id_market' `id_carrier' `id_time')
 * Create proper market shares first (as in processing_data.do commented code)
 di as yellow "    ---------  Creating shares and log differences ---------"
 
+tab year quarter, missing
+
 //********** move from here 
 // TODO:  Move avd dist  to processing_data.do
 // Calculate rival average distance (for future IV use)
-bysort origin destination year quarter: egen double total_distance = total(average_distance)
-bysort origin destination year quarter: gen double average_distance_rival = ///
-    (total_distance - average_distance) / ( _N - 1 )
-drop total_distance
+// bysort origin destination year quarter: egen double total_distance = total(average_distance)
+// bysort origin destination year quarter: gen double average_distance_rival = ///
+//     (total_distance - average_distance) / ( _N - 1 )
+// drop total_distance
 
-// TODO:  Move fringe  to processing_data.do
-// Calculate number of fringe firms (non-major carriers) per market
-// Assuming major_carrier_flag is created in carrier_flags.do
-gen fringe = 1 - major
-bysort origin destination year quarter: egen fringe_carriers = total(fringe)
+// // TODO:  Move fringe  to processing_data.do
+// // Calculate number of fringe firms (non-major carriers) per market
+// // Assuming major_carrier_flag is created in carrier_flags.do
+// gen fringe = 1 - major
+// bysort origin destination year quarter: egen fringe_carriers = total(fringe)
 //********** move until here
 
 * Market-level total passengers (sum over products in each market-time)

@@ -326,6 +326,11 @@ di as yellow "------------------------------------ Processing DB1B Market data -
             di as yellow "    ---------  Creating rival stats ---------"
             // * Create presence and num_markets variables first (needed for rival calculations)
             
+            // Calculate number of fringe firms (non-major carriers) per market
+            // Assuming major_carrier_flag is created in carrier_flags.do
+            gen fringe = 1 - major
+            bysort origin destination year quarter: egen fringe_carriers = total(fringe)
+            
             // Presence = carrier's share of passengers at ORIGIN in that year/quarter (across all destinations)
             // First calculate total passengers by origin-carrier-year-quarter
             bysort origin carrier year quarter: egen origin_carrier_pax = total(total_passengers)
@@ -336,7 +341,8 @@ di as yellow "------------------------------------ Processing DB1B Market data -
             replace presence = 0 if missing(presence)
             
             // num_markets = number of distinct destinations this carrier serves from this origin in year/quarter
-            bysort origin carrier year quarter: egen num_markets = count(destination) // num_markets, is num of destinations. 
+            bysort origin carrier year quarter: egen num_destinations = count(destination) // num_destinations
+            bysort carrier year quarter: egen num_markets = count(market) // num_markets defined as number of distinct markets served by this carrier in this origin in year/quarter
 
             drop origin_carrier_pax origin_total_pax
             
@@ -345,26 +351,27 @@ di as yellow "------------------------------------ Processing DB1B Market data -
             sort origin destination year quarter
             by origin destination year quarter: egen double total_presence = total(presence)
             by origin destination year quarter: egen double total_num_markets = total(num_markets)
+            by origin destination year quarter: egen double total_num_destinations = total(num_destinations)
+            by origin destination year quarter: egen double total_distance = total(average_distance)
+
+            // Calculate rival average X (for future IV use)
+            
             by origin destination year quarter: gen double average_presence_rival = ///
                 (total_presence - presence) / ( _N - 1 )
             by origin destination year quarter: gen double average_num_markets_rival = ///
                 (total_num_markets - num_markets) / ( _N - 1 )
+            by origin destination year quarter: gen double average_num_destinations_rival = ///
+                (total_num_destinations - num_destinations) / ( _N - 1 )
+            by origin destination year quarter: gen double average_distance_rival = ///
+            (total_distance - average_distance) / ( _N - 1 )
+
             by origin destination year quarter: gen int rival_carriers = _N - 1
+            
+            drop total_distance 
+            
             keep if rival_carriers > 0 // removing monopolies
 
-            di as yellow "    ---------  Creating shares and log differences ---------"
-
-            // * Shares
-            by origin destination year quarter: gen double share = 10 * total_passengers / market_size // mkt size is sqrt(orig_pop*dest_pop), so share is scaled by 10
-            by origin destination year quarter: egen double sum_share = total(share)
-            gen outside_share = 1 - sum_share
-            gen double within_share  = sum_share //! check if groups in nest are supposed to be something else
-
-            drop sum_share
-
-            gen double log_diff_shares = ln(share) - ln(outside_share)
-
-            sum share within_share outside_share log_diff_shares
+            // Note: Mkt share creation now moved to demand_estimation.do
 
             // ---------------- Append to CSV --------------------------------
             di as yellow "    ---------  Writing data to output file ---------"
