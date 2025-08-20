@@ -6,7 +6,7 @@ This project demonstrates how to estimate market demand and simulate mergers, de
 This project estimates demand and simulates the merger process between airlines.
 
 ## PROJECT STRUCTURE:
-- src/: Code that downloads, cleans and estimates demand. 
+- src/: Code that downloads, cleans, and estimates demand. 
 - data/: Input data files (airline data, routes, financial data)
     - raw/: Raw data from sources
     - processed/: Processed data from functions
@@ -16,7 +16,7 @@ This project estimates demand and simulates the merger process between airlines.
 ## PROGRESS AND RUNNING ORDER:
 1. Run data downloads .py files, see instructions (Run: download_db1b.py)
 2. Preprocess downloaded data: processing_data.do
-3. Demand estimation → TODO
+3. Demand estimation: demand_estimation.do
 4. Merger simulation → TODO
 
 ## REQUIREMENTS:
