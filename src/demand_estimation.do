@@ -161,7 +161,7 @@ gen s_0t = 1 - s_inside_t
 replace s_0t = .0000001 if s_0t<=0  // small epsilon to avoid -inf
 
 * log(S_t): create from market_size (which is sqrt(orig_pop*dest_pop))
-gen logS = ln(market_size)
+gen logS = ln(market_size) // not needed for est
 
 * Dependent variable for simple logit
 gen lns_minus_lno = ln(s_jt) - ln(s_0t)
@@ -179,8 +179,11 @@ gen carrier_dummy = 1
 // - by non stop vs. connecting :
 gen nonstop_route = (share_nonstop >= 0.5)  // or some threshold// egen nest_g = group(`id_market' `id_time' nonstop_route)
 
-// - by carrier type (legacy vs. LCC)
+// - by carrier type (legacy)
 // egen nest_g = group(`id_market' `id_time' legacy)  // or major, or lcc
+
+// - by low cost carrier (LCC) vs. legacy:
+// egen nest_g = group(`id_market' `id_time' lcc)  // or major, or legacy
 
 // - by hub vs. non-hub:
 gen hub_route = (origin_hub == 1 | destination_hub == 1) // egen nest_g = group(`id_market' `id_time' hub_route)
@@ -261,6 +264,9 @@ esttab using "$OUT/demand_vars_stats.tex", replace ///
 
 display as text "Saved: $OUT/demand_vars_stats.tex"
 
+tab carrier, sum(legacy)
+
+tab carrier major
 *-------------------------*
 * OLS (logit form)       *
 *-------------------------*
