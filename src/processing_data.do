@@ -10,6 +10,7 @@
 //         * auxiliary tables (city market lookup, vacations, population, slot-controlled airports, T_MASTER_CORD)
 
 // * output: airline_data.csv (processed data for analysis)
+
 // -----------------------------------------------------------------------------
 
 // ---------------------- PATHS (EDIT THESE ONLY) -------------------------------
@@ -29,7 +30,7 @@ global CODE_DIR      "./src/"                                   // source code d
 
 // If the output dir doesn’t exist, Stata will create on first export
 
-log close
+// log close
 log using "${CODE_DIR}logs/processing_data.log", replace
 
 
@@ -99,6 +100,7 @@ save `slots'
 // * T_MASTER_CORD (airport metadata; filter to CONUS)
 
 import delimited using "${PROC_OTHER}t_master_cord.csv", varnames(1) clear
+
 // ensure lowercase column names
 foreach v of varlist * {
     local newname = lower("`v'")
@@ -108,14 +110,18 @@ foreach v of varlist * {
 }
 keep if airport_country_code_iso == "US" & !inlist(airport_state_code,"PR","VI","TT","HI","AK")
 
-keep airport_id
-duplicates drop
+keep airport_id display_airport_name display_airport_city_name_full
+duplicates drop airport_id, force
 rename airport_id originairportid  // for origin merge
+rename display_airport_name orig_airport_name
+rename display_airport_city_name_full orig_city
 tempfile conus_origin
 save `conus_origin'
 
 // Create separate copy for destination merge
 rename originairportid destairportid
+rename orig_airport_name dest_airport_name
+rename orig_city dest_city
 tempfile conus_dest
 save `conus_dest'
 
@@ -255,7 +261,6 @@ di as yellow "------------------------------------ Processing DB1B Market data -
             rename population dest_pop
             replace dest_pop = . if dest_pop<=0
 
-            gen double market_size = sqrt(origin_pop * dest_pop)
             drop airport_id
             // drop origin_pop dest_pop // not sure if later needed
 
@@ -284,17 +289,27 @@ di as yellow "------------------------------------ Processing DB1B Market data -
             gen double weighted_nonstop_miles = nonstopmiles * passengers
             gen double weighted_fare = mktfare_real * passengers
             
-            // Collapse with appropriate aggregation methods
-            collapse ///
-                (sum)   total_passengers = passengers ///
-                        weighted_distance weighted_nonstop_miles weighted_fare ///
-                (mean)  market_size ///
-                        origin_hub destination_hub ///
-                        destination_vacation ///
-                        origin_slot_controlled destination_slot_controlled ///
-                        share_nonstop = nonstop, ///
-                by(origin destination carrier year quarter)
+            // Save string variables to merge back later
+            preserve 
+                keep origin destination carrier year quarter orig_city orig_airport_name dest_city dest_airport_name
+                duplicates drop origin destination carrier year quarter, force
+                tempfile string_vars
+                save `string_vars' 
+            restore
 
+            // Collapse the numeric variables origin_pop dest_pop
+            collapse ///
+            (sum)   total_passengers = passengers ///
+                    weighted_distance weighted_nonstop_miles weighted_fare ///
+            (mean)  destination_vacation ///
+                    origin_hub destination_hub ///
+                    origin_pop dest_pop ///
+                    origin_slot_controlled destination_slot_controlled ///
+                    share_nonstop = nonstop, ///
+            by(origin destination carrier year quarter)
+
+            // Merge the string variables back
+            merge 1:1 origin destination carrier year quarter using `string_vars', nogenerate
             
             // Calculate final weighted averages
             gen double average_distance = weighted_distance / total_passengers
@@ -305,7 +320,6 @@ di as yellow "------------------------------------ Processing DB1B Market data -
             // Clean up temporary variables
             drop weighted_distance weighted_nonstop_miles weighted_fare
 
-
             di as yellow "               Data collapsed to (O-D-carrier-quarter) level successfully, obs: " _N 
 
             di as yellow "    ---------  Creating identifiers ---------"
@@ -313,7 +327,12 @@ di as yellow "------------------------------------ Processing DB1B Market data -
             // Use more efficient string creation to avoid "expression too long" error
             tostring origin, gen(origin_str)
             tostring destination, gen(dest_str)
-            gen str25 market = origin_str + "-" + dest_str
+            gen str11 market_code = origin_str + "-" + dest_str
+
+            gen market_name = orig_airport_name + " - " + dest_airport_name
+            gen str100 market_airport_city = orig_airport_name + ", " + orig_city + " - " + dest_airport_name + ", " + dest_city
+
+            drop orig_airport_name dest_airport_name orig_city dest_city
 
             tostring year, gen(year_str)
             tostring quarter, gen(quarter_str)  
@@ -343,7 +362,7 @@ di as yellow "------------------------------------ Processing DB1B Market data -
             
             // num_markets = number of distinct destinations this carrier serves from this origin in year/quarter
             bysort origin carrier year quarter: egen num_destinations = count(destination) // num_destinations
-            bysort carrier year quarter: egen num_markets = count(market) // num_markets defined as number of distinct markets served by this carrier in this origin in year/quarter
+            bysort carrier year quarter: egen num_markets = count(market_code) // num_markets defined as number of distinct markets served by this carrier in this origin in year/quarter
 
             drop origin_carrier_pax origin_total_pax
             
