@@ -56,9 +56,9 @@
 // * “Notes on the Nested Logit Demand Model.” (short technical memo)
 // ***********************************************************************
 
-*-------------------------*
-* USER CHOICES & PATHS   *
-*-------------------------*
+// *-------------------------*
+// * USER CHOICES & PATHS   *
+// *-------------------------*
 clear all
 
 * Paths
@@ -90,7 +90,14 @@ di as yellow "    Demand estimation started for years: $YEARS, quarters: $QUARTE
 local source_csv "${PROC_DATA}airline_data.csv"
 di as yellow "    Source data: `source_csv'"
 
-* Column mapping in your airline_data.csv (matching processing_data.do output)
+
+
+// *-------------------------*
+// * COLUMN MAPPING         *
+// * Column mapping in airline_data.csv (matching processing_data.do output)
+// * Set up column mapping below
+// *-------------------------*
+
 * Required identifiers
 local id_prod      "product_id"            // product (itinerary/airline) id - we'll create this
 local id_market    "market_code"                // origin–destination market id (fixed effect)
@@ -98,15 +105,18 @@ local id_market    "market_code"                // origin–destination market i
 local id_time      "time"                  // time (optional control/cluster)
 local id_carrier   "carrier"               // marketing carrier code 
 local id_group_2     "legacy"                  // definition for LEVEL 2 of the nest e.g. lcc, legacy
-local id_group_1     "carrier_dummy"          // definition for LEVEL 1 of the nest e.g. carrier_dummy(inside vs outside), 
+local id_group_1     "carrier_dummy"          // definition for LEVEL 1 of the nest e.g. carrier_dummy(inside vs outside),  (CREATED LATER)
                                                 //  if only one nest `id_group_1' leave empty, and fill `id_group_2' with the nest definition                      
 
 * Demand-side quantities (matching processing_data.do variable names)
-local market_size_var "market_size"          // market size variable (sqrt(orig_pop*dest_pop)), generate later the variables
-local var_fare     "average_fare"          // average ticket price
-local var_nest     "lns_minus_ln_g lns_minus_ln_h"          // ln(s_jt|h) ln(s_ht|g) for nested logit, s_minus_ln_g
+local market_size_var "pop_o_d_geo_mean"      // market size variable (sqrt(orig_pop*dest_pop)), (CREATED LATER)
+            // other options generated are pop_sum, mean_pop, max_pop 
+                                                // choose one of these three alternatives if you want a different market size definition
+                                                // adjust demand scale accordingly, right now set to 10
+local var_fare     "average_fare"          // average ticket price 
+local var_nest     "lns_minus_ln_g lns_minus_ln_h"          // ln(s_jt|h) ln(s_ht|g) for nested logit, s_minus_ln_g (CREATED LATER)
                                                 // if 2-level: lns_minus_ln_g lns_minus_ln_h, if single-level: lns_minus_ln_h
-local var_fringe   "fringe_carriers"        // fringe_carriers: number of rival carriers in market // this might supposed to be something else
+local var_fringe   "fringe_carriers"        // fringe_carriers: number of rival carriers in market 
 
 * Rival-based instruments (matching processing_data.do variable names)
 local iv_rivaldist   "average_distance_rival" // average distance rival (for IV)
@@ -114,13 +124,14 @@ local iv_rivalpres   "average_presence_rival" // average presence rival (for IV)
 local iv_rivalmkts   "average_num_destinations_rival" // options: average_num_destinations_rival average_num_markets_rival
 local iv_numrivals   "rival_carriers"
 
-*-------------------------*
-* LOCALS FOR ESTIMATION  *
-*-------------------------*
+// *-------------------------*
+// * LOCALS FOR ESTIMATION  *
+// * Set up locals for estimation below (X, Z, nests, FE etc.)
+// *-------------------------*
 
 di as yellow "    ---------  Setting up locals for estimation ---------"
 
-* Core X’s (match Table C2): price first so α is easy to spot, Other var: logS?
+* Core X’s (match Table C2): price first so α is easy to spot, 
 local X_exog  "share_nonstop dist_k dist_k2 lnum_fringe"
 local X_core  "`var_fare' `X_exog'"
 
@@ -132,7 +143,10 @@ local Z_nest2 "`iv_numrivals'_nest2"
 local FE      "`id_market'"              // OD fixed effects, plus time maybe `id_time'
 local CL      "`id_market'"       // cluster by OD (you can switch) O-D clusters with those FE cause collinearity when IVs.
 
+scalar scale_share = 10  // scale factor for shares, if market size is pop_o_d_geo_mean (sqrt(orig_pop*dest_pop))
+
 local est_models "OLS IV NL_OLS IV_NL" // list of models estimates to report
+
 // *-------------------------*
 // * LOAD & PREP            *
 // *-------------------------*
@@ -143,7 +157,6 @@ tostring `id_market' `id_carrier' `id_time', replace
 
 * Create product ID (combination of market, carrier, time)
 egen long product_id = group(`id_market' `id_carrier' `id_time')
-
 
 * Create proper market shares first (as in processing_data.do commented code)
 di as yellow "    ---------  Creating shares and log differences ---------"
@@ -162,10 +175,10 @@ di as yellow "    ---------  Creating shares and log differences ---------"
 tab year quarter, missing
 
 // market definition: geometric mean 
-cap gen double market_size = sqrt(origin_pop * dest_pop)
+cap gen double pop_o_d_geo_mean = sqrt(origin_pop * dest_pop)
 
 // alternative market size definitions
-cap gen double market_size_sum = origin_pop + dest_pop
+cap gen double pop_sum = origin_pop + dest_pop
 cap gen double mean_pop = (origin_pop + dest_pop)/2
 cap gen double max_pop = max(origin_pop, dest_pop)
 
@@ -173,7 +186,7 @@ cap gen double max_pop = max(origin_pop, dest_pop)
 bys `id_market' `id_time': egen pax_market = total(total_passengers)
 
 // * Market shares for logit
-gen s_jt = (10 * total_passengers)/`market_size_var' // mkt size is sqrt(orig_pop*dest_pop), so share is scaled by 10
+gen s_jt = (scale_share * total_passengers)/`market_size_var' // mkt size is sqrt(orig_pop*dest_pop), so share is scaled by 10
 bys `id_market' `id_time': egen s_inside_t = total(s_jt)
 gen s_0t = 1 - s_inside_t
 replace s_0t = .0000001 if s_0t<=0  // small epsilon to avoid -inf
@@ -290,12 +303,13 @@ sum lns_minus_lno lns_minus_ln_g lns_minus_ln_h s_g s_h share s_jt s_0t s_inside
 sum `X_core' `Z_core' `Z_nest2'
 
 qui estpost sum s_jt s_0t s_inside_t s_g s_h rival_carriers num_markets `X_core' `Z_core' `Z_nest2', detail
-esttab using "$OUT/demand_vars_stats.tex", replace ///
+esttab using "$OUT/demand_vars_stats_`id_group_2'.tex", replace ///
+    substitute(\_ _ ) ///
     title("Summary statistics: variables used in demand estimation") ///
     cells("mean(fmt(3)) sd(fmt(3)) min(fmt(4)) p25(fmt(4)) p50(fmt(3)) p75(fmt(3)) max(fmt(3))") ///
     label booktabs nonum
 
-display as text "Saved: $OUT/demand_vars_stats.tex"
+display as text "Saved: $OUT/demand_vars_stats_`id_group_2'.tex"
 
 // *-------------------------*
 // * OLS (logit form)       *
@@ -381,21 +395,22 @@ local i = 1
 foreach n in `var_nest' {
     esttab fsivn_`n' using "$OUT/demand_results_fs_`n'_`id_group_`i''.tex", replace ///
         b(4) se(4) label booktabs se star(* 0.10 ** 0.05 *** 0.01)
+    local ++i
 }
 
 // print for log
 
 esttab `est_models', b(4) se(4) ar2  label booktabs se star(* 0.10 ** 0.05 *** 0.01) ///
-    keep(`var_fare' share_nonstop dist_k dist_k2 lnum_fringe `var_nest') ///
-    order(`var_fare' share_nonstop dist_k dist_k2 lnum_fringe `var_nest') ///
+    keep(`var_fare' `X_exog' `var_nest') ///
+    order(`var_fare' `X_exog' `var_nest') ///
     scalars("N Observations" "widstat F-statistic (IV)")
 
 // export all other models
     
 esttab `est_models' using "$OUT/demand_results_all.tex", replace ///
     b(4) se(4) ar2  label booktabs se star(* 0.10 ** 0.05 *** 0.01) ///
-    keep(`var_fare' share_nonstop dist_k dist_k2 lnum_fringe `var_nest') ///
-    order(`var_fare' share_nonstop dist_k dist_k2 lnum_fringe `var_nest') ///
+    keep(`var_fare' `X_exog' `var_nest') ///
+    order(`var_fare' `X_exog' `var_nest') ///
     substitute(\_ _) ///
     scalars("N Observations" "widstat F-statistic (IV)") ///
     title("Demand Estimates (Logit and Nested-Logit)") nonotes
@@ -403,8 +418,8 @@ esttab `est_models' using "$OUT/demand_results_all.tex", replace ///
 
 esttab OLS IV NL_OLS IV_NL  using "$OUT/demand_results_basic.tex", replace ///
     b(4) se(4) ar2  label booktabs se star(* 0.10 ** 0.05 *** 0.01) ///
-    keep(`var_fare' share_nonstop dist_k dist_k2 lnum_fringe `var_nest') ///
-    order(`var_fare' share_nonstop dist_k dist_k2 lnum_fringe `var_nest') ///
+    keep(`var_fare' `X_exog' `var_nest') ///
+    order(`var_fare' `X_exog' `var_nest') ///
     scalars("N Observations" "widstat F-statistic (IV)") ///
     substitute(\_ _) ///
     title("Demand Estimates (Logit and Nested-Logit)") nonotes
@@ -412,9 +427,9 @@ esttab OLS IV NL_OLS IV_NL  using "$OUT/demand_results_basic.tex", replace ///
 
 esttab IV_NL IV_NL2 using "$OUT/demand_results_nested_2lv_`id_group_2'.tex", replace ///
     b(4) se(4) ar2  label booktabs se star(* 0.10 ** 0.05 *** 0.01) ///
-    keep(`var_fare' share_nonstop dist_k dist_k2 lnum_fringe `var_nest') ///
+    keep(`var_fare' `X_exog' `var_nest') ///
     substitute(\_ _) ///
-    order(`var_fare' share_nonstop dist_k dist_k2 lnum_fringe `var_nest') ///
+    order(`var_fare' `X_exog' `var_nest') ///
     scalars("N Observations" "widstat F-statistic (IV)") ///
     title("Demand Estimates (Logit and Nested-Logit)") nonotes
         // stats(N r2, fmt(0 3) labels("Observations" "R^2")) ///
@@ -449,21 +464,20 @@ if "`id_group_1'" != "" {
     di as yellow "Nesting parameters: σ1 = " sigma1 ", σ2 = " sigma2
 
     scalar alpha_nl = _b[`var_fare']
+    di as yellow "Price coefficient: α = " alpha_nl
 
     scalar lambda1 = 1 - sigma1   // = 1 - σ1
     scalar lambda2 = 1 - sigma2   // = 1 - σ2
 
     * Two-level nested-logit own-price elasticity
     /* ε_jt =  α * p_jt * [ (1/λ1) * (1 - s_j|h) + (1/λ2) * s_j|h * (1 - s_h|g) + s_j|h * s_h|g * (1 - s_g) ]
-    This line calculates the nested logit probabilities and their derivatives 
-    based on the given parameters. The nested logit model is an extension of the 
-    multinomial logit model, allowing for correlation within groups (nests) of 
-    alternatives.
+    This line calculates the nested logit probabilities and their derivatives based on the given parameters.
+    The nested logit model is an extension of the  multinomial logit model, allowing for correlation within
+    groups (nests) of alternatives.
 
     Special cases:
     1. If σ1 = σ2 = 0 (multinomial logit), the formula simplifies to:
         ε_jj = α * p_j * (1 - s_j).
-
     2. If there is only one nest level (e.g., σ1 = 0), the formula reduces to:
         ε_jj = α * p_j *  [1 - σ2 * s_j|h - (1 - σ2) * s_j]/(1 - σ2) 
     */
@@ -476,20 +490,28 @@ if "`id_group_1'" != "" {
 
 est restore IV_NL
 
-di as yellow "Single-level nesting parameter: σ = " _b[lns_minus_ln_h]
+
 
 scalar alpha_nl = _b[`var_fare']
 scalar sigma    = _b[lns_minus_ln_h]
+di as yellow "Single-level nesting parameter: σ = " sigma
+di as yellow "Price coefficient: α = " alpha_nl
 
 * Single-level nested logit elasticity: 
 *  ε_jj = α * p_j * [1 - σ s_{j|g} - (1 - σ) s_j] / (1 - σ)
 gen double own_el_lv1 = alpha_nl * `var_fare' * ( (1 - sigma*s_j_h - (1 - sigma)*s_jt) / (1 - sigma) )
 
-sum own_el_lv1 own_el_lv2
+// sum for log
+di as yellow "    Summary of own-price elasticities:"
+sum own_el_ols own_el_lv1 own_el_lv2
 
-// Export elasticities
+// * -------------------------*
+// * Export elasticities
+// * -------------------------*
+di as yellow "    ---------  Exporting elasticities to LaTeX ---------"
+
 qui estpost sum own_el_ols own_el_lv1 own_el_lv2, detail
-esttab using "$OUT/demand_elasticities.tex", replace ///
+esttab using "$OUT/demand_elasticities_`id_group_2'.tex", replace ///
     title("Elasticities: Own-price (Logit and Nested-Logit)") ///
     cells("count mean(fmt(3)) sd(fmt(3)) min(fmt(3)) p25(fmt(3)) p50(fmt(3)) p75(fmt(3)) max(fmt(3))") ///
     label booktabs nonum ///
@@ -501,31 +523,39 @@ display as text "Saved: $OUT/demand_elasticities.tex"
 di as yellow "    ---------  Exporting elasticity histogram ---------"
 preserve
 
-    keep if own_el_lv2 < 0.2 & own_el_lv2 > -12 // filter for better histogram
+    * Calculate 1% and 99% percentiles for filtering
+    summarize own_el_lv2, detail
+    local p1 = r(p1)
+    local p99 = r(p99)
+
+    keep if own_el_lv2 >= `p1' & own_el_lv2 <= `p99' // filter based on percentiles
     histogram own_el_lv2, ///
         title("Own-Price Elasticities (Nested-Logit)") ///
         xtitle("Elasticity") ytitle("Frequency") ///
         graphregion(color(white)) plotregion(color(white)) ///
         bin(60) fcolor(navy%60) lcolor(white) lwidth(thin) ///
-        xlabel(-12(2)0.1) //\input{../src/output/demand_results_fs_lns_minus_ln_g.tex}
+        xlabel(`p1'(2)`p99') 
 
     // # use graph export
-    graph export "$OUT/elasticity_logit_histogram_nests_lv2.pdf", replace
+    graph export "$OUT/elasticity_logit_histogram_nests_lv2_`id_group_2'.pdf", replace
 
-    display as text "Saved: $OUT/elasticity_logit_histogram_nests_lv2.pdf"
+    display as text "Saved: $OUT/elasticity_logit_histogram_nests_lv2_`id_group_2'.pdf"
 
 restore
-
 preserve
 
-    keep if own_el_lv1 < 0.2 & own_el_lv1 > -12 // filter for better histogram
+    * Calculate 1% and 99% percentiles for filtering
+    summarize own_el_lv1, detail
+    local p1 = r(p1)
+    local p99 = r(p99)
+
+    keep if own_el_lv1 >= `p1' & own_el_lv1 <= `p99' // filter based on percentiles
     histogram own_el_lv1, ///
         title("Own-Price Elasticities (Nested-Logit)") ///
         xtitle("Elasticity") ytitle("Frequency") ///
         graphregion(color(white)) plotregion(color(white)) ///
         bin(60) fcolor(navy%60) lcolor(white) lwidth(thin) ///
-        xlabel(-12(2)0.1) //\input{../src/output/demand_results_fs_lns_minus_ln_g.tex}
-
+        xlabel(`p1'(2)`p99') 
     // # use graph export
     graph export "$OUT/elasticity_logit_histogram_nests_lv1.pdf", replace
 
