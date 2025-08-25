@@ -1,42 +1,145 @@
 \documentclass{article}
-\usepackage[margin=0.7in]{geometry}
+\usepackage[margin=0.8in]{geometry}
 \usepackage{graphicx}
 \usepackage{booktabs}
 \usepackage{caption}
 \usepackage{float}
 \usepackage{subcaption}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{hyperref}
 
 \title{Demand Estimation Report}
 \author{Airlines Merger Simulation}
+% Giselle Labrador-Badia for Karam Kang and JF Houde
+% University of Wisconsin-Madison
 \date{\today}
 
 \begin{document}
 
 \maketitle
 
+% \section{Introduction} % old when one nest 
+% This report presents the results of the demand estimation analysis conducted as part of the Airlines Merger Simulation project. The tables and figures included here summarize the key findings.
+
+% The model specification follows a logit and nested-logit framework, where consumer utility is modeled as:
+% \begin{itemize}
+%     \item \textbf{Logit Model:} $\ln(s_{jt}) - \ln(s_{0t}) = \alpha p_{jt} + x_{jt} \beta + \xi_t + \xi_{jt} + \epsilon_{ijt}$
+%     \item \textbf{Nested-Logit Model:} $\ln(s_{jt}) - \ln(s_{0t}) = \alpha p_{jt} + x_{jt} \beta + \sigma \ln(s_{jt|g}) + \xi_t + \xi_{jt} + \epsilon_{ijt}$
+% \end{itemize}
+% where:
+% \begin{itemize}
+%     \item $p_{jt}$ is the average fare (price).
+%     \item $x_{jt}$ includes regressors such as share nonstop, average distance, squared distance, and log(1 + number of fringe carriers).
+%     \item $\nu_t$ and $\xi_{jt}$ are fixed effects for origin-destination and product-level unobservables.
+%     \item $s_{jt|g}$ is the share of product $j$ in group $g$.
+%     \item $\sigma$ captures the nesting parameter in the nested-logit model.
+%     \item Instruments ($z^D_{jt}$) include average rival presence, average number of markets served by rivals, and the number of rival carriers.
+% \end{itemize}
+
 \section{Introduction}
 This report presents the results of the demand estimation analysis conducted as part of the Airlines Merger Simulation project. The tables and figures included here summarize the key findings.
 
-The model specification follows a logit and nested-logit framework, where consumer utility is modeled as:
+We estimate logit and two-level nested-logit demand. In our application, the \emph{top (group) level} partitions alternatives into \textbf{Outside} vs.\ \textbf{Inside} the air-travel market (the outside option is no trip / other modes). Within the \textbf{Inside} group, the \emph{subgroup level} partitions products into \textbf{Legacy} vs.\ \textbf{Low-Cost Carrier (LCC)}.
+
+\section{Model and Nesting Structure}
+Let $t$ index markets (e.g., OD-quarter). Products $j$ belong to a subgroup $h\in\{ \text{Legacy},\text{Non-Legacy}\}$ (or \text{LCC}) nested inside a group $g\in\{\text{Outside (not flying)},\text{Inside carrier}\}$; by convention the outside good $j=0$ belongs to $g=\text{Outside}$.
+
+\subsection*{Utility (two-level nested logit)}
+For consumer $i$ in market $t$,
+\begin{align}
+u_{ijt}
+&= \delta_{jt} \;+\; (1-\sigma_1)\,\varepsilon_{ijt} \;+\; (\sigma_1-\sigma_2)\,\zeta_{iht} \;+\; \sigma_2\,\eta_{igt}, 
+\qquad 0 \le \sigma_2 \le \sigma_1 < 1, \label{eq:util-2lvl}\\
+\delta_{jt}
+&= \mathbf{x}_{jt}'\beta \;+\; \alpha\,p_{jt} \;+\; \mu_t \;+\; \xi_{jt}. \label{eq:delta-mean}
+\end{align}
+Here $\varepsilon_{ijt},\zeta_{iht},\eta_{igt}$ are independent Type I EV shocks generating correlation within subgroups ($h$) and groups ($g$). We follow the \textbf{“\,+$\alpha p$\,”} convention in \eqref{eq:delta-mean}; economically, $\alpha<0$ is expected.
+
+Define the scale parameters $\lambda_1 \equiv 1-\sigma_1$ (within-subgroup scale) and $\lambda_2 \equiv 1-\sigma_2$ (within-group scale), with $0<\lambda_2\le\lambda_1\le 1$.
+
+% \subsection*{Choice probabilities}
+% Let
+% \[
+% D_{ht} \equiv \sum_{k\in h} \exp\!\big(\delta_{kt}/\lambda_1\big), 
+% \qquad 
+% C_{gt} \equiv \sum_{r\in \mathcal{H}_g} D_{rt}^{\,\lambda_1/\lambda_2},
+% \qquad 
+% T_t \equiv \sum_{m\in\{\text{Outside},\text{Inside}\}} C_{mt}^{\,\lambda_2}.
+% \]
+% Then the conditional and unconditional shares are
+% \begin{align}
+% s_{j|h,t} &= \frac{\exp(\delta_{jt}/\lambda_1)}{D_{ht}}, 
+% & s_{h|g,t} &= \frac{D_{ht}^{\,\lambda_1/\lambda_2}}{C_{gt}},
+% & s_{gt} &= \frac{C_{gt}^{\,\lambda_2}}{T_t}, \\
+% s_{jt} &= s_{j|h,t}\, s_{h|g,t}\, s_{gt},
+% & s_{0t} &= \frac{1}{T_t}\quad (\text{outside good}). \label{eq:shares-2lvl}
+% \end{align}
+
+\subsection*{Estimating equation (two-level)}
+Using the standard nested-logit inversion,
+\begin{align}
+\boxed{~
+\log s_{jt} - \log s_{0t}
+\;=\;
+\mathbf{x}_{jt}'\beta \;+\; \alpha\,p_{jt}
+\;+\; \sigma_2\,\log s_{j|h,t}
+\;+\; \sigma_1\,\log s_{h|g,t}
+\;+\; \mu_t \;+\; \xi_{jt}.
+~}
+\label{eq:estim-2lvl}
+\end{align}
+In the airline application: \\
+- \emph{Group $g$}: \(\{\text{Outside},\text{Inside}\}\) (inside vs.\ outside). \\
+- \emph{Subgroups $h$ within $g=\text{Inside}$}: \(\{\text{Legacy}, \text{Non-Legacy}\}\) (or \text{LCC}). \\
+- For $g=\text{Outside}$, the outside good forms a degenerate subgroup.
+
+\subsection*{Special cases}
 \begin{itemize}
-    \item \textbf{Logit Model:} $\ln(s_{jt}) - \ln(s_{0t}) = \alpha p_{jt} + x_{jt} \beta + \xi_t + \xi_{jt} + \epsilon_{ijt}$
-    \item \textbf{Nested-Logit Model:} $\ln(s_{jt}) - \ln(s_{0t}) = \alpha p_{jt} + x_{jt} \beta + \sigma \ln(s_{jt|g}) + \xi_t + \xi_{jt} + \epsilon_{ijt}$
+\item \textbf{One-level nested logit} (collapse the subgroup level): set $\sigma_1=0$ (so $\lambda_1=1$). Then
+\[
+\log s_{jt} - \log s_{0t}
+\;=\;
+\mathbf{x}_{jt}'\beta \;+\; \alpha\,p_{jt}
+\;+\; \sigma_2\,\log s_{j|h,t}
+\;+\; \mu_t \;+\; \xi_{jt},
+\]
+where now $h$ is the single (within-inside) nest (e.g., carrier-based).
+\item \textbf{Multinomial logit} (no within-group correlation): set $\sigma_1=\sigma_2=0$.
 \end{itemize}
-where:
+
+\subsection*{Regressors and instruments}
+We take $p_{jt}$ as average fare and $\mathbf{x}_{jt}$ to include share nonstop, (thousand-mile) distance and its square, and $\log(1+\text{rival carriers})$. We use standard rival-based shifters as instruments for $p_{jt}$ (and, if needed, for the nesting terms): average rivals' number of markets served, average rivals' route distance, and the number of rival carriers in the market-time cell.
+
+\section{DB1B Data \& Cleaning Summary}
+
 \begin{itemize}
-    \item $p_{jt}$ is the average fare (price).
-    \item $x_{jt}$ includes regressors such as share nonstop, average distance, squared distance, and log(1 + number of fringe carriers).
-    \item $\nu_t$ and $\xi_{jt}$ are fixed effects for origin-destination and product-level unobservables.
-    \item $s_{jt|g}$ is the share of product $j$ in group $g$.
-    \item $\sigma$ captures the nesting parameter in the nested-logit model.
-    \item Instruments ($z^D_{jt}$) include average rival presence, average number of markets served by rivals, and the number of rival carriers.
+  \item \textbf{Source:} DOT DB1B ``Market'' files (10\% ticket survey). Auxiliaries: city--market lookup (vacation flag), airport metadata (T\_MASTER\_CORD), airport--year populations, slot-controlled airports, carrier--airport hub table, and annual CPI index (2008{=}100; \texttt{cpi\_index.csv}).
+  \item \textbf{Coverage:} Years 2005--2019; quarters 1--4; CONUS only (U.S. excluding PR, VI, TT, HI, AK), filtered via T\_MASTER\_CORD.
+  \item \textbf{Market definition:} City-pair O--D level using \texttt{origincitymarketid} and \texttt{destcitymarketid}; time unit is a calendar quarter.
+  \item \textbf{Product definition:} O--D--\texttt{tkcarrier}--quarter. Monopoly O--D--quarter cells dropped (require $\ge 2$ carriers).
+  \item \textbf{Core filters:}
+  \begin{itemize}
+    \item No interline tickets: \texttt{tkcarrierchange == 0}.
+    \item Real fare bounds: keep if real market fare $\in[25, 2500]$ USD, where real fare \texttt{mktfare\_real} is \texttt{mktfare} deflated using annual CPI (2008{=}100).
+    \item Demand size screen at O--D--quarter: keep if total passengers $\ge 20 \times 365 / (4 \times 0.10) \approx 183$ in DB1B (i.e., at least 20 pax/day in the full universe, adjusted for the 10\% sample).
+  \end{itemize}
+\item \textbf{Other variables:} CONUS filter and airport names/cities from T\_MASTER\_CORD (origin/destination); slot-controlled airport indicators at origin and destination; destination ``vacation'' flag from city lookup; airport--year populations for origin and destination (nonpositive values set to missing); carrier--airport hub indicators (wide $\to$ long reshape).
+  \item \textbf{Aggregation (passenger-weighted) to O--D--carrier--quarter:}
+  \begin{itemize}
+    \item Average distance, nonstop miles, and fare; share of nonstop; extra miles $=$ distance $-$ nonstop miles.
+    \item Carrier presence at origin (origin--carrier passenger share), \# destinations from the origin, and \# markets served.
+    \item Rival statistics at the O--D--quarter: average rival presence, \# markets, \# destinations, and average rival distance.
+  \end{itemize}
+  \item \textbf{Carriers:} Flags for carrier types (e.g., major, low-cost, legacy ) created in \texttt{carrier\_flags.do}; carrier code is \texttt{tkcarrier} (IATA 2-letter).
+  \item \textbf{Output:} Final panel collapsed to O--D--carrier--quarter, with string IDs for market (\texttt{origin-destination}) and time (\texttt{year-quarter}); written to \texttt{data/processed/combined/airline\_data.csv}.
 \end{itemize}
 
+\subsection*{Variable Summary Statistics}
+Lower level refers to lower nest define as \textit{legacy vs. non-legacy carriers} in the table below.
 
-\section{Summary Statistics}
-
-
-\input{../src/output/demand_vars_stats.tex}
+% \input{../src/output/demand_vars_stats.tex}
+\input{../src/output/demand_vars_stats_legacy.tex}
 
 \pagebreak
 \section{Demand Estimation Results}
@@ -49,22 +152,81 @@ All columns include fixed effects for origin-destination markets. Robust standar
 
 
 %The coefficients are interpreted as elasticities, with standard errors clustered at the market level.
-\input{../src/output/demand_results.tex}
 
+First, we present the basic demand estimation results. Column (1) presents the results of the logit model without instruments, while column (2) shows the logit model results with price instruments. Column (3) shows the nested-logit model without instruments, and column (4) presents the nested-logit model with one level  and instruments for both prices and nest shares.
+
+\input{../src/output/demand_results_basic.tex} 
+
+\pagebreak
+\subsection{Full model, two-level nesting as legacy vs. non-legacy carriers}
+
+
+Below, we present the full model results in cluding two levels of nesting and instruments for both prices and nest shares. The first column shows only one level of nesting (inside vs.\ outside), while the second column shows two levels of nesting (inside vs.\ outside, and legacy vs.\ within inside). All columns include fixed effects for origin-destination markets. Robust standard errors are reported in parentheses below the coefficients.
+
+The instruments used are average rival distance, average number of markets served by rivals, the number of rival carriers and the number of rival carriers for the nest definition in the market. 
+
+\input{../src/output/demand_results_nested_2lv_legacy.tex}
+\pagebreak
+\subsection{Full model, two-level nesting as low-cost vs. non low-cost carriers}
+Now I show results where the lower (second) nest is low-cost vs. non low-cost carriers.
+
+\input{../src/output/demand_results_nested_2lv_lcc.tex}
+
+\pagebreak
 \section{Elasticities}
-\centering
 
-\input{../src/output/demand_elasticities.tex}
+These are observation level elasticities calculated using the parameters from the two-level nested logit model with legacy vs. non-legacy carriers as the second level nest and instruments for both prices and nest shares.
+
+\input{../src/output/demand_elasticities_legacy.tex}
+
+When low cost vs. non low-cost carriers is used as the second level nest, the elasticities are as follows (third row).
+\input{../src/output/demand_elasticities_lcc.tex}
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=0.8\textwidth]{../src/output/elasticity_logit_histogram.pdf}
-    \caption{Histogram of Elasticities}
+    \includegraphics[width=0.7\textwidth]{../src/output/elasticity_logit_histogram_nests_lv1.pdf}
+    \caption{Histogram of Elasticities, one-level nest}
 \end{figure}
 
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\textwidth]{../src/output/elasticity_logit_histogram_nests_lv2_legacy.pdf}
+    \caption{Histogram of Elasticities, two-level nest (legacy vs. non-legacy, inside vs. outside)}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.7\textwidth]{../src/output/elasticity_logit_histogram_nests_lv2_lcc.pdf}
+    \caption{Histogram of Elasticities, two-level nest (low-cost vs. non low-cost, inside vs. outside)}
+\end{figure}
 \pagebreak
 \section{Appendix: First Stage Results}
+\begin{table}[htbp]
+    \caption{First Stage Results for Fare}
+    \centering
 \input{../src/output/demand_results_fs_fare.tex}
+\end{table}
 
-\input{../src/output/demand_results_fs_nest.tex}
+% Below, are the first stage for the first level nest share variable.
+\begin{table}[htbp]
+    \caption{First Stage Results for Legacy First Level Nest Share Variable}
+    \centering
+    \input{../src/output/demand_results_fs_lns_minus_ln_g_carrier_dummy.tex}
+\end{table}
+
+\pagebreak
+Below are the first stage for the second level nest share variable for legacy nests and low-cost nests.
+\begin{table}[htbp]
+    \caption{First Stage Results for Legacy Nest Share Variable (Second Level)}
+    \centering
+    \input{../src/output/demand_results_fs_lns_minus_ln_h_legacy.tex}
+\end{table}
+
+\begin{table}[htbp]
+    \caption{First Stage Results for Low-Cost Nest Share Variable (Second Level)}
+    \centering
+    \input{../src/output/demand_results_fs_lns_minus_ln_h_lcc.tex}
+\end{table}
+
+
 \end{document}

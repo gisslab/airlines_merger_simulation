@@ -1,8 +1,8 @@
---------------------------------------------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------------------------------------------------------------
       name:  <unnamed>
        log:  /Users/gisellelab/Work/airlines_merger_simulation/src/logs/demand_estimation.log
   log type:  text
- opened on:  19 Aug 2025, 19:06:08
+ opened on:  24 Aug 2025, 20:46:08
 
 . 
 . // ---------------------- PARAMETERS -------------------------------------------
@@ -13,16 +13,15 @@
 . global TYPE     "Market"   // DB1B “Market”
 
 . 
-. di as yellow "--------------------------------------------------------------------------------------------------"
+. {
+.     di as yellow "--------------------------------------------------------------------------------------------------"
 --------------------------------------------------------------------------------------------------
-
-. di as yellow "----------------------------------- Running demand_estimation.do --------------------------------"
------------------------------------ Running demand_estimation.do --------------------------------
-
-. di as yellow "--------------------------------------------------------------------------------------------------"
+.     di as yellow "----------------------------------- Running demand_estimation.do ---------------------------------"
+----------------------------------- Running demand_estimation.do ---------------------------------
+.     di as yellow "--------------------------------------------------------------------------------------------------"
 --------------------------------------------------------------------------------------------------
+. }
 
-. 
 . cap mkdir "$OUT"
 
 . 
@@ -37,26 +36,41 @@
     Source data: ./data/processed/combined/airline_data.csv
 
 . 
-. * Column mapping in your airline_data.csv (matching processing_data.do output)
+. // *----------------------------------------------------------*
+. // * COLUMN MAPPING                                           *
+. // * Column mapping in airline_data.csv (matching processing_data.do output)
+. // * Set up configuration for column mapping below
+. // *----------------------------------------------------------*
+. 
 . * Required identifiers
 . local id_prod      "product_id"            // product (itinerary/airline) id - we'll create this
 
-. local id_market    "market"                // origin–destination market id (fixed effect)
+. local id_market    "market_code"                // origin–destination market id (fixed effect)
 
+.                                             // possibles (same meaning) market_airport_city mkt_code mkt_name
 . local id_time      "time"                  // time (optional control/cluster)
 
 . local id_carrier   "carrier"               // marketing carrier code 
 
-. local id_group     "carrier_dummy"          // definition for nesting e.g. major, carrier_dummy(inside vs outside)
+. local id_group_2     "lcc"                  // definition for LEVEL 2 of the nest e.g. lcc, legacy
 
+. local id_group_1     "carrier_dummy"          // definition for LEVEL 1 of the nest e.g. carrier_dummy(inside vs outside),  (CREATED LATER)
+
+.                                                 //  if only one nest `id_group_1' leave empty, and fill `id_group_2' with the nest definiti
+> on                      
 . 
 . * Demand-side quantities (matching processing_data.do variable names)
-. local var_fare     "average_fare"          // average ticket price
+. local market_size_var "pop_o_d_geo_mean"      // market size variable (sqrt(orig_pop*dest_pop)), (CREATED LATER)
 
-. local var_nest     "lns_minus_lng"          // ln(s_jt|g) for nested logit, lng_share or lns_minus_lng
+.             // other options generated are pop_o_d_geo_mean, pop_sum, mean_pop, max_pop 
+.                                                 // choose one of these three alternatives if you want a different market size definition
+.                                                 // adjust demand scale accordingly, right now set to 10
+. local var_fare     "average_fare"          // average ticket price 
 
-. local var_fringe   "fringe_carriers"        // fringe_carriers: number of rival carriers in market // this might suppose
-> d to be something else
+. local var_nest     "lns_minus_ln_g lns_minus_ln_h"          // ln(s_jt|h) ln(s_ht|g) for nested logit, s_minus_ln_g (CREATED LATER)
+
+.                                                 // if 2-level: lns_minus_ln_g lns_minus_ln_h, if single-level: lns_minus_ln_h
+. local var_fringe   "fringe_carriers"        // fringe_carriers: number of rival carriers in market 
 
 . 
 . * Rival-based instruments (matching processing_data.do variable names)
@@ -64,84 +78,131 @@
 
 . local iv_rivalpres   "average_presence_rival" // average presence rival (for IV)
 
-. local iv_rivalmkts   "average_num_destinations_rival" // options: average_num_destinations_rival average_num_markets_riv
-> al
+. local iv_rivalmkts   "average_num_destinations_rival" // options: average_num_destinations_rival average_num_markets_rival
 
 . local iv_numrivals   "rival_carriers"
 
 . 
-. *-------------------------*
-. * LOCALS FOR ESTIMATION  *
-. *-------------------------*
+. // *----------------------------------------------------------*
+. // * LOCALS FOR ESTIMATION                                    *
+. // * CONFIG locals for estimation below (X, Z, nests, FE etc.)
+. // *----------------------------------------------------------*
 . 
 . di as yellow "    ---------  Setting up locals for estimation ---------"
     ---------  Setting up locals for estimation ---------
 
 . 
-. * Core X’s (match Table C2): price first so α is easy to spot, Other var: logS?
+. * Core X’s (match Table C2): price first so α is easy to spot, 
 . local X_exog  "share_nonstop dist_k dist_k2 lnum_fringe"
 
 . local X_core  "`var_fare' `X_exog'"
 
 . 
 . * Instruments (rival shifters)
-. local Z_core  "`iv_rivaldist' `iv_rivalmkts' `iv_numrivals'"
+. local Z_price  "`iv_rivaldist' `iv_rivalmkts'"
+
+. local Z_core  "`Z_price' `iv_numrivals'"
+
+. local Z_nest2 "`iv_numrivals'_nest2"
 
 . 
 . * FE and clusters
 . local FE      "`id_market'"              // OD fixed effects, plus time maybe `id_time'
 
-. local CL      "`id_market'"       // cluster by OD (you can switch) O-D clusters with those FE cause collinearity when I
-> Vs.
+. local CL      "`id_market'"       // cluster by OD (you can switch) O-D clusters with those FE cause collinearity when IVs.
 
 . 
-. *-------------------------*
-. * LOAD & PREP            *
-. *-------------------------*
+. local clustering_config "vce(robust)"  // leave empty or vce(robust) for robust, or add "cluster(`CL')" or "vce(cluster <clustering_group>)
+> " for clustered SEs
+
+. 
+. scalar scale_share = 10  // scale factor for shares, if market size is pop_o_d_geo_mean (sqrt(orig_pop*dest_pop))
+
+. 
+. scalar min_share = 10^-7  // minimum share to keep an observation (to avoid -inf in log)
+
+. 
+. local est_models "OLS IV NL_OLS IV_NL" // list of models estimates to report
+
+. 
+. // *----------------------------------------------------------*
+. // * LOAD & PREP                                              *
+. // *----------------------------------------------------------*
 . import delimited using "`source_csv'",  clear
 (encoding automatically selected: ISO-8859-1)
-(35 vars, 1,677,867 obs)
+(38 vars, 1,677,867 obs)
 
 . 
 . * Make sure key variables are in proper format
-. * market and time are strings, carrier is string - this is fine for now
-. * but we need to handle them as strings
+. tostring `id_market' `id_carrier' `id_time', replace
+market_code already string; no replace
+carrier already string; no replace
+time already string; no replace
+
 . 
 . * Create product ID (combination of market, carrier, time)
 . egen long product_id = group(`id_market' `id_carrier' `id_time')
 (29 missing values generated)
 
 . 
-. * Make sure time can be used for grouping (keep as string for now)
-. * market stays as string (it's the market identifier)
-. * carrier stays as string
-. 
 . * Create proper market shares first (as in processing_data.do commented code)
 . di as yellow "    ---------  Creating shares and log differences ---------"
     ---------  Creating shares and log differences ---------
 
 . 
-. //********** move from here 
-. // TODO:  Move avd dist  to processing_data.do
-. // Calculate rival average distance (for future IV use)
-. // bysort origin destination year quarter: egen double total_distance = total(average_distance)
-. // bysort origin destination year quarter: gen double average_distance_rival = ///
-. //     (total_distance - average_distance) / ( _N - 1 )
-. // drop total_distance
+. // * Share definitions:
+. * s_jt     : product share s_j
+. * s_j_h    : conditional share s_{j|h}
+. * s_h_g    : conditional share s_{h|g}
+. * s_g      : group share (sum of s_j over all products in group g)
+. * s_h      : sub-group share (sum of s_j over all products in sub-group h)
+. * price    : product price (your `var_fare')
+. * sigma1   : coefficient on ln(s_{h|g}) from your 2-level NL regression
+. * sigma2   : coefficient on ln(s_{j|h}) from your 2-level NL regression
+. * alpha_nl : the regression coefficient on price
 . 
-. // // TODO:  Move fringe  to processing_data.do
-. // // Calculate number of fringe firms (non-major carriers) per market
-. // // Assuming major_carrier_flag is created in carrier_flags.do
-. // gen fringe = 1 - major
-. // bysort origin destination year quarter: egen fringe_carriers = total(fringe)
-. //********** move until here
+. tab year quarter, missing
+
+           |                   quarter
+      year |         1          2          3          4 |     Total
+-----------+--------------------------------------------+----------
+      2005 |    31,337     34,277     33,865     32,868 |   132,347 
+      2006 |    31,741     34,752     34,667     34,449 |   135,609 
+      2007 |    32,884     34,798     33,903     32,691 |   134,276 
+      2008 |    29,852     33,813     32,841     31,377 |   127,883 
+      2009 |    29,442     32,528     32,294     31,218 |   125,482 
+      2010 |    29,986     30,659     30,853     29,502 |   121,000 
+      2011 |    27,443     30,542     30,474     29,290 |   117,749 
+      2012 |    24,087     25,997     25,747     25,078 |   100,909 
+      2013 |    23,765     26,621     26,468     25,874 |   102,728 
+      2014 |    25,095     27,208     26,861     25,682 |   104,846 
+      2015 |    23,730     26,374     21,794     21,263 |    93,161 
+      2016 |    20,098     22,739     22,946     22,231 |    88,014 
+      2017 |    21,235     23,200     23,373     23,343 |    91,151 
+      2018 |    21,948     25,193     25,301     25,077 |    97,519 
+      2019 |    23,694     27,358     27,448     26,693 |   105,193 
+-----------+--------------------------------------------+----------
+     Total |   396,337    436,059    428,835    416,636 | 1,677,867 
+
 . 
-. * Market-level total passengers (sum over products in each market-time)
+. // market definition: geometric mean 
+. cap gen double pop_o_d_geo_mean = sqrt(origin_pop * dest_pop)
+
+. 
+. // alternative market size definitions
+. cap gen double pop_sum = origin_pop + dest_pop
+
+. cap gen double mean_pop = (origin_pop + dest_pop)/2
+
+. cap gen double max_pop = max(origin_pop, dest_pop)
+
+. 
+. * Market-level total passengers (sum over products in each market-time), can be used for an alternative market definition
 . bys `id_market' `id_time': egen pax_market = total(total_passengers)
 
 . 
 . // * Market shares for logit
-. gen s_jt = (10 * total_passengers)/market_size // mkt size is sqrt(orig_pop*dest_pop), so share is scaled by 10
+. gen s_jt = (scale_share * total_passengers)/`market_size_var' // mkt size is sqrt(orig_pop*dest_pop), so share is scaled by 10
 (40,951 missing values generated)
 
 . bys `id_market' `id_time': egen s_inside_t = total(s_jt)
@@ -152,54 +213,80 @@
 (0 real changes made)
 
 . 
-. * log(S_t): create from market_size (which is sqrt(orig_pop*dest_pop))
-. gen logS = ln(market_size)
+. * log(S_t): create from `market_size' (which is sqrt(orig_pop*dest_pop))
+. gen logS = ln(`market_size_var') // not needed for estimation
 (40,951 missing values generated)
 
 . 
-. * Dependent variable for simple logit
+. * Dependent variable for logit
 . gen lns_minus_lno = ln(s_jt) - ln(s_0t)
 (40,951 missing values generated)
 
 . 
 . // * Nest definition: Group by  nest
 . 
-. // * Possible nests definitions:
-. 
-. // - inside goods
+. // Possible nests definitions below:
+. // - by inside goods (inside nest vs outside)
 . gen carrier_dummy = 1
 
-. 
-. // - by airline type (major vs. non-major):
-. // egen nest_g = group(`id_market' `id_time' major)
-. 
+. // - by airline type (major vs. non-major), though is has time variation
+. // - by carrier type (legacy)
+. // - by low cost carrier (LCC) vs. legacy: 
 . // - by non stop vs. connecting :
-. gen nonstop_route = (share_nonstop >= 0.5)  // or some threshold// egen nest_g = group(`id_market' `id_time' nonstop_rou
-> te)
+. gen nonstop_route = (share_nonstop >= 0.5)  // or some threshold
+
+. // - by hub vs. non-hub:
+. gen hub_route = (origin_hub == 1 | destination_hub == 1) 
 
 . 
-. // - by carrier type (legacy vs. LCC)
-. // egen nest_g = group(`id_market' `id_time' legacy)  // or major, or lcc
-. 
-. // - by hub vs. non-hub:
-. gen hub_route = (origin_hub == 1 | destination_hub == 1) // egen nest_g = group(`id_market' `id_time' hub_route)
+. // if group_2 is empty and group_1 is not, use group_1 only swap
+. if "`id_group_2'" == "" & "`id_group_1'" != "" {
+.     di as yellow "    Note: nest 2 var `id_group_2' is empty, using only `id_group_1' for nest definition"
+.     local id_group_2 "`id_group_1'"
+.     local id_group_1 ""
+. }
 
 . 
 . // * Create definition var with defined `var_group'
 . * This creates meaningful nests where multiple carriers belong to the same nest
-. egen nest_g = group(`id_market' `id_time' `id_group')  // or legacy, or lcc
+. egen nest_h = group(`id_market' `id_time' `id_group_2')  // or legacy, or lcc
 
-. bys nest_g: egen s_gjt = total(s_jt)                   // nest share (incl current j)
+. bys nest_h: egen s_h = total(s_jt)                   // nest share (incl current j)
 
-. 
-. // replace s_gjt = min(max(s_gjt, .000001), .999999)
-. 
-. * Nested-logit transformed outcome
-. gen lns_minus_lng = ln(s_jt) - ln(s_gjt)
+. gen s_j_h = s_j / s_h             // Share within sub-nest h
 (40,951 missing values generated)
 
 . 
-. gen lng_share = ln(s_gjt) // this should be the within cluster share  s_jt // is this necessary?
+. // replace s_h = min(max(s_h, .000001), .999999) // avoid 0 or 1
+. 
+. if "`id_group_1'" != "" {
+.     egen nest_g = group(`id_market' `id_time' `id_group_1')  // or legacy, or lcc
+.     bys nest_g: egen s_g = total(s_jt)                   // nest share (incl current j)
+.     gen s_j_g = s_jt / s_g             // Share within sub-nest g
+(40,951 missing values generated)
+.     local nest_lv1 "lns_minus_ln_jg"
+. } 
+
+. else {
+.     di as yellow "    Note: using single-level nesting with `id_group_2' only"
+.     local nest_lv1 "lns_minus_ln_h"
+.     gen s_g = s_h  // if only one nest, then s_g =
+. }
+
+. // Define shares for nested logit structure
+. gen s_h_g = s_h / s_g             // Share of sub-nest h within top nest g
+(40,951 missing values generated)
+
+. 
+. * Nested-logit transformed nest shares
+. gen lns_minus_ln_h = ln(s_j_h)           // Share within sub-nest h// same as ln(s_jt) - ln(s_h)
+(40,951 missing values generated)
+
+. gen lns_minus_ln_g = ln(s_h_g)           // Share of sub-nest h within top nest g// same as ln(s_h) - ln(s_g) //! it's zero if single-level
+>  nest
+(40,951 missing values generated)
+
+. gen lns_minus_ln_jg = ln(s_j_g)           // Share of top nest g within overall nest j// same as ln(s_g) - ln(s_j)
 (40,951 missing values generated)
 
 . 
@@ -208,9 +295,9 @@
 (0 observations deleted)
 
 . 
-. // -------------------------*
-.  * Other variables X
-. *-------------------------*
+. // *----------------------------------------------------------*
+. //  * Other variables X
+. // *----------------------------------------------------------*
 . 
 . * Distances in thousands and squared
 . gen dist_k   = average_distance/1000
@@ -222,14 +309,18 @@
 . gen lnum_fringe = ln(1 + `var_fringe')
 
 . 
-. // -------------------------*
-. * Check variables
-. *-------------------------*
+. // generate num_rivals for nested `id_market' `id_time': egen num_rivals = total(rival_carriers)
+. bys nest_h: gen int rival_carriers_nest2 = _N - 1
+
+. 
+. // *----------------------------------------------------------*
+. // * Check variables
+. // *----------------------------------------------------------*
 . * Keep a clean estimation sample
 . di as yellow "    Initial observations: " _N
     Initial observations: 1677867
 
-. keep if s_jt>0 & s_0t>0 & s_gjt>0
+. keep if s_jt>min_share & s_0t>min_share& s_h>min_share
 (40,951 observations deleted)
 
 . di as yellow "    After share filters: " _N
@@ -247,7 +338,7 @@
 . di as yellow "    After X_core missing: " _N
     After X_core missing: 1636916
 
-. drop if missing(lns_minus_lno) | missing(lns_minus_lng)
+. drop if missing(lns_minus_lno) | missing(lns_minus_ln_h) 
 (0 observations deleted)
 
 . di as yellow "    After outcome missing: " _N
@@ -276,9 +367,9 @@
 . }
 
 . 
-. * -------------------------*
-. * Labels
-. *-------------------------*
+. // *----------------------------------------------------------*
+. // * Labels
+. // *----------------------------------------------------------*
 . 
 . do "$CODE_DIR/labels.do"
 
@@ -287,9 +378,25 @@
 . // * Purpose: Labels for variables in the dataset
 . // -----------------------------------------------------------------------------
 . 
-. label var lns_minus_lno "ln(s_jt) - ln(s_0t)"
+. label var time "Year/Quarter"
 
-. label var lns_minus_lng "ln(s_jt) - ln(s_gt)"
+. label var market_code "Airports (origin-destination)"
+
+. label var market_name "Airports Name (origin-destination)"
+
+. label var lns_minus_lno "\$\ln s_{jt}/s_{0t}\$"
+
+. label var lns_minus_ln_h "\$\ln s_{jt|h}\$"
+
+. label var lns_minus_ln_g "\$\ln s_{ht|g}\$"
+
+. label var lns_minus_ln_jg "\$\ln s_{jt|g}\$"
+
+. label var legacy "Legacy carrier"
+
+. label var lcc "Low-cost carrier"
+
+. label var major "Major carrier"
 
 . label var average_fare "Average fare (dollars)"
 
@@ -309,7 +416,7 @@
 
 . label var rival_carriers "Number of rival carriers"
 
-. label var lng_share "Log nest share"
+. label var rival_carriers_nest2 "Number of rival carriers lower nest"
 
 . label var s_jt "Market share"
 
@@ -317,91 +424,101 @@
 
 . label var s_inside_t "Inside share sum"
 
-. label var s_gjt "Nest share"
+. label var s_g "Nest share (Upper level)"
 
-. label var lng_share "ln(s_gt)"
+. label var s_h "Nest share (Lower level)"
+
+. label var s_j_h "\$ s_{jt|h}\$ conditional share (Firm | Lower)"
+
+. label var s_h_g "\$ s_{ht|g}\$ conditional share (Lower | Upper)"
+
+. label var s_j_g "\$ s_{jt|g}\$ conditional share (Firm | Nest)"
+
+. label var nest_h "Lower level nest coefficient"
+
+. label var nest_g "Upper level nest coefficient"
 
 . label var average_num_markets_rival "Average number of rival markets"
-
-. label var average_num_destinations_rival "Average number of rival destinations"
 
 . label var average_distance_rival "Average distance to rival markets"
 
 . label var average_presence_rival "Average presence of rival carriers"
 
-. // label var elast_logit "Own elasticity (logit)"
-. // label var elast_nlogit "Own elasticity (nested-logit)"
+. label var average_num_destinations_rival "Average number of rival destinations"
+
+. 
 . // -----------------------------------------------------------------------------
 . 
 end of do-file
 
 . 
-. *-------------------------*
-. * SUMMARY STATS → LaTeX  *
-. *-------------------------*
+. // *----------------------------------------------------------*
+. // * SUMMARY STATS → LaTeX                                    *
+. // *----------------------------------------------------------*
 . cap which esttab
 
 . if _rc ssc install estout, replace
 
 . 
-. sum lns_minus_lno lns_minus_lng lng_share `X_core' share s_jt s_0t s_inside_t
+. // print for log
+. sum lns_minus_lno lns_minus_ln_g lns_minus_ln_h s_g s_h share s_jt s_0t s_h_g s_j_h
 
     Variable |        Obs        Mean    Std. dev.       Min        Max
 -------------+---------------------------------------------------------
 lns_minus_~o |  1,636,916    -8.05655    1.858922  -14.27474   .0842574
-lns_minus_~g |  1,636,916   -2.735036    1.854939  -11.71411   -.000062
-   lng_share |  1,636,916   -5.329907    .9424638   -8.70559  -.4101813
+lns_minus~_g |  1,636,916   -.5481164    .8152674  -9.979893          0
+lns_minus_~h |  1,636,916    -2.18692    1.843083  -11.10121          0
+         s_g |  1,636,916    .0081974    .0157906   .0001657   .6635299
+         s_h |  1,636,916    .0051455    .0124247   1.05e-06     .60667
+-------------+---------------------------------------------------------
+share_nons~p |  1,636,916    .2020219    .3616515          0          1
+        s_jt |  1,636,916    .0013417    .0058076   6.12e-07   .4734702
+        s_0t |  1,636,916    .9918026    .0157906   .3364701   .9998344
+       s_h_g |  1,636,916    .6998087    .2998158   .0000463          1
+       s_j_h |  1,636,916    .3072455    .3307519   .0000151          1
+
+. sum `X_core' `Z_core' `Z_nest2'
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
 average_fare |  1,636,916    224.8843    92.99161         25   2492.016
 share_nons~p |  1,636,916    .2020219    .3616515          0          1
--------------+---------------------------------------------------------
       dist_k |  1,636,916    1.493539    .8604235       .067     10.345
      dist_k2 |  1,636,916    2.970988    3.732698    .004489    107.019
  lnum_fringe |  1,636,916    .3498799    .4551073          0   2.564949
-share_nons~p |  1,636,916    .2020219    .3616515          0          1
-        s_jt |  1,636,916    .0013417    .0058076   6.12e-07   .4734702
--------------+---------------------------------------------------------
-        s_0t |  1,636,916    .9918026    .0157906   .3364701   .9998344
-  s_inside_t |  1,636,916    .0081974    .0157906   .0001657   .6635299
-
-. sum `Z_core' `var_fare' dist_k dist_k2 lnum_fringe
-
-    Variable |        Obs        Mean    Std. dev.       Min        Max
 -------------+---------------------------------------------------------
 average_di~l |  1,636,916    1493.539     830.698         67    5996.58
 ave~ns_rival |  1,636,916    52.18329     26.1421          1        153
 rival_carr~s |  1,636,916    5.234965    2.249802          1         22
-average_fare |  1,636,916    224.8843    92.99161         25   2492.016
-      dist_k |  1,636,916    1.493539    .8604235       .067     10.345
--------------+---------------------------------------------------------
-     dist_k2 |  1,636,916    2.970988    3.732698    .004489    107.019
- lnum_fringe |  1,636,916    .3498799    .4551073          0   2.564949
+rival_carr~2 |  1,636,916    3.352807    1.906055          0         15
 
 . 
-. qui estpost sum s_jt s_0t s_inside_t s_gjt rival_carriers num_markets `X_core', detail
+. qui estpost sum s_jt s_0t s_inside_t s_g s_h rival_carriers num_markets `X_core' `Z_core' `Z_nest2', detail
 
-. esttab using "$OUT/demand_vars_stats.tex", replace ///
+. esttab using "$OUT/demand_vars_stats_`id_group_2'.tex", replace ///
+>     substitute(\_ _ ) ///
 >     title("Summary statistics: variables used in demand estimation") ///
 >     cells("mean(fmt(3)) sd(fmt(3)) min(fmt(4)) p25(fmt(4)) p50(fmt(3)) p75(fmt(3)) max(fmt(3))") ///
 >     label booktabs nonum
-(output written to ./src/output//demand_vars_stats.tex)
+(output written to ./src/output//demand_vars_stats_lcc.tex)
 
 . 
-. display as text "Saved: $OUT/demand_vars_stats.tex"
-Saved: ./src/output//demand_vars_stats.tex
+. display as text "Saved: $OUT/demand_vars_stats_`id_group_2'.tex"
+Saved: ./src/output//demand_vars_stats_lcc.tex
 
 . 
-. *-------------------------*
-. * OLS (logit form)       *
-. *-------------------------*
-. di as yellow "    ---------  Running OLS logit (informal) ---------"
-    ---------  Running OLS logit (informal) ---------
+. // *----------------------------------------------------------*
+. // * OLS (logit form).                                        *
+. // *----------------------------------------------------------*
+. di as yellow "    ---------  Running OLS logit  ---------"
+    ---------  Running OLS logit  ---------
 
 . 
 . cap which reghdfe
 
 . if _rc ssc install reghdfe, replace
 
-. reghdfe lns_minus_lno `X_core', absorb(`FE') vce(robust) // vce(cluster `CL')
+. reghdfe lns_minus_lno `X_core', absorb(`FE') `clustering_config' // vce(cluster `CL')
 (MWFE estimator converged in 1 iterations)
 
 HDFE Linear regression                            Number of obs   =  1,636,916
@@ -428,15 +545,15 @@ Absorbed degrees of freedom:
 -----------------------------------------------------+
  Absorbed FE | Categories  - Redundant  = Num. Coefs |
 -------------+---------------------------------------|
-      market |      7843           0        7843     |
+ market_code |      7843           0        7843     |
 -----------------------------------------------------+
 
 . estimates store OLS
 
 . 
-. *-------------------------*
-. * IV-LOGIT (price endog) *
-. *-------------------------*
+. // *----------------------------------------------------------*
+. // * IV-LOGIT (price endog)                                   *
+. // *----------------------------------------------------------*
 . di as yellow "    ---------  Running IV logit (price endogenous) ---------"
     ---------  Running IV logit (price endogenous) ---------
 
@@ -445,8 +562,8 @@ Absorbed degrees of freedom:
 
 . if _rc ssc install ivreghdfe, replace
 
-. ivreghdfe lns_minus_lno (`var_fare' = `Z_core') `X_exog', ///
->     absorb(`FE') first savefirst savefp(fsiv_)  vce(robust) // vce(cluster `CL')
+. ivreghdfe lns_minus_lno (`var_fare' = `Z_price') `X_exog', ///
+>     absorb(`FE') first savefirst savefp(fsiv_)  `clustering_config' // vce(cluster `CL')
 (MWFE estimator converged in 1 iterations)
 
 Stored estimation results
@@ -455,7 +572,7 @@ Stored estimation results
              |           Dependent  Number of        
         Name | Command    variable     param.  Title 
 -------------+---------------------------------------------------------------------
-fsiv_avera~e | ivreg2    average_fare       7  First-stage regression: average_fare
+fsiv_avera~e | ivreg2    average_fare       6  First-stage regression: average_fare
 -----------------------------------------------------------------------------------
 
 First-stage regressions
@@ -470,19 +587,18 @@ Number of obs =                1636916
                                |               Robust
                   average_fare | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
 -------------------------------+----------------------------------------------------------------
-        average_distance_rival |   .0346675   .0008007    43.30   0.000     .0330982    .0362367
-average_num_destinations_rival |  -1.055499   .0087072  -121.22   0.000    -1.072565   -1.038433
-                rival_carriers |  -5.666353    .066857   -84.75   0.000    -5.797391   -5.535316
-                 share_nonstop |  -4.949848    .303995   -16.28   0.000    -5.545668   -4.354029
-                        dist_k |   46.29696   1.845812    25.08   0.000     42.67923    49.91468
-                       dist_k2 |   4.354482   .4784367     9.10   0.000     3.416762    5.292201
-                   lnum_fringe |   3.634389   .2198332    16.53   0.000     3.203524    4.065254
+        average_distance_rival |    .022195   .0007829    28.35   0.000     .0206605    .0237295
+average_num_destinations_rival |  -.8527458   .0084702  -100.68   0.000     -.869347   -.8361445
+                 share_nonstop |  -4.853737   .3040625   -15.96   0.000    -5.449688   -4.257785
+                        dist_k |   42.04307   1.851124    22.71   0.000     38.41493    45.67121
+                       dist_k2 |   4.672601    .479619     9.74   0.000     3.732564    5.612637
+                   lnum_fringe |  -7.410575   .1994204   -37.16   0.000    -7.801432   -7.019718
 ------------------------------------------------------------------------------------------------
 F test of excluded instruments:
-  F(  3,1629066) =  6498.80
+  F(  2,1629067) =  5853.36
   Prob > F      =   0.0000
 Sanderson-Windmeijer multivariate F test of excluded instruments:
-  F(  3,1629066) =  6498.80
+  F(  2,1629067) =  5853.36
   Prob > F      =   0.0000
 
 
@@ -491,51 +607,43 @@ Summary results for first-stage regressions
 -------------------------------------------
 
                                            (Underid)            (Weak id)
-Variable     | F(  3,1629066)  P-val| SW Chi-sq(  3) P-val | SW F(  3,1629066)
-average_fare |    6498.80    0.0000 |    19590.35   0.0000 |     6498.80
+Variable     | F(  2,1629067)  P-val| SW Chi-sq(  2) P-val | SW F(  2,1629067)
+average_fare |    5853.36    0.0000 |    11763.13   0.0000 |     5853.36
 
 NB: first-stage test statistics heteroskedasticity-robust
 
 Stock-Yogo weak ID F test critical values for single endogenous regressor:
-                                    5% maximal IV relative bias    13.91
-                                   10% maximal IV relative bias     9.08
-                                   20% maximal IV relative bias     6.46
-                                   30% maximal IV relative bias     5.39
-                                   10% maximal IV size             22.30
-                                   15% maximal IV size             12.83
-                                   20% maximal IV size              9.54
-                                   25% maximal IV size              7.80
+                                   10% maximal IV size             19.93
+                                   15% maximal IV size             11.59
+                                   20% maximal IV size              8.75
+                                   25% maximal IV size              7.25
 Source: Stock-Yogo (2005).  Reproduced by permission.
 NB: Critical values are for i.i.d. errors only.
 
 Underidentification test
 Ho: matrix of reduced form coefficients has rank=K1-1 (underidentified)
 Ha: matrix has rank=K1 (identified)
-Kleibergen-Paap rk LM statistic          Chi-sq(3)=19058.39 P-val=0.0000
+Kleibergen-Paap rk LM statistic          Chi-sq(2)=11447.79 P-val=0.0000
 
 Weak identification test
 Ho: equation is weakly identified
-Cragg-Donald Wald F statistic                                    7179.44
-Kleibergen-Paap Wald rk F statistic                              6498.80
+Cragg-Donald Wald F statistic                                    6231.91
+Kleibergen-Paap Wald rk F statistic                              5853.36
 
-Stock-Yogo weak ID test critical values for K1=1 and L1=3:
-                                    5% maximal IV relative bias    13.91
-                                   10% maximal IV relative bias     9.08
-                                   20% maximal IV relative bias     6.46
-                                   30% maximal IV relative bias     5.39
-                                   10% maximal IV size             22.30
-                                   15% maximal IV size             12.83
-                                   20% maximal IV size              9.54
-                                   25% maximal IV size              7.80
+Stock-Yogo weak ID test critical values for K1=1 and L1=2:
+                                   10% maximal IV size             19.93
+                                   15% maximal IV size             11.59
+                                   20% maximal IV size              8.75
+                                   25% maximal IV size              7.25
 Source: Stock-Yogo (2005).  Reproduced by permission.
 NB: Critical values are for Cragg-Donald F statistic and i.i.d. errors.
 
 Weak-instrument-robust inference
 Tests of joint significance of endogenous regressors B1 in main equation
 Ho: B1=0 and orthogonality conditions are valid
-Anderson-Rubin Wald test           F(3,1629066)=17766.58    P-val=0.0000
-Anderson-Rubin Wald test           Chi-sq(3)=   53556.57    P-val=0.0000
-Stock-Wright LM S statistic        Chi-sq(3)=   50560.76    P-val=0.0000
+Anderson-Rubin Wald test           F(2,1629067)=3070.14     P-val=0.0000
+Anderson-Rubin Wald test           Chi-sq(2)=   6169.87     P-val=0.0000
+Stock-Wright LM S statistic        Chi-sq(2)=   6178.97     P-val=0.0000
 
 NB: Underidentification, weak identification and weak-identification-robust
     test statistics heteroskedasticity-robust
@@ -543,8 +651,8 @@ NB: Underidentification, weak identification and weak-identification-robust
 Number of observations               N  =    1636916
 Number of regressors                 K  =          5
 Number of endogenous regressors      K1 =          1
-Number of instruments                L  =          7
-Number of excluded instruments       L1 =          3
+Number of instruments                L  =          6
+Number of excluded instruments       L1 =          2
 
 IV (2SLS) estimation
 --------------------
@@ -553,45 +661,40 @@ Estimates efficient for homoskedasticity only
 Statistics robust to heteroskedasticity
 
                                                       Number of obs =  1636916
-                                                      F(  5,1629068) = 62517.87
+                                                      F(  5,1629068) =  1.5e+05
                                                       Prob > F      =   0.0000
-Total (centered) SS     =  5064054.029                Centered R2   =  -0.7143
-Total (uncentered) SS   =  5064054.029                Uncentered R2 =  -0.7143
-Residual SS             =  8681079.237                Root MSE      =    2.308
+Total (centered) SS     =  5064054.027                Centered R2   =   0.1960
+Total (uncentered) SS   =  5064054.027                Uncentered R2 =   0.1960
+Residual SS             =  4071275.196                Root MSE      =    1.581
 
 -------------------------------------------------------------------------------
               |               Robust
 lns_minus_lno | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
 --------------+----------------------------------------------------------------
- average_fare |   .0239113   .0002239   106.78   0.000     .0234724    .0243502
-share_nonstop |   2.107872   .0086945   242.44   0.000     2.090831    2.124913
-       dist_k |  -5.077151   .0435418  -116.60   0.000    -5.162491   -4.991811
-      dist_k2 |   .1453129   .0108903    13.34   0.000     .1239683    .1666576
-  lnum_fringe |  -.4661273   .0059956   -77.74   0.000    -.4778785   -.4543761
+ average_fare |   .0102056   .0001915    53.28   0.000     .0098302     .010581
+share_nonstop |   2.023675   .0057306   353.14   0.000     2.012444    2.034907
+       dist_k |  -4.577976   .0209094  -218.94   0.000    -4.618958   -4.536995
+      dist_k2 |   .2153262   .0048929    44.01   0.000     .2057363    .2249161
+  lnum_fringe |  -.4859576   .0040944  -118.69   0.000    -.4939825   -.4779326
 -------------------------------------------------------------------------------
-Underidentification test (Kleibergen-Paap rk LM statistic):            1.9e+04
-                                                   Chi-sq(3) P-val =    0.0000
+Underidentification test (Kleibergen-Paap rk LM statistic):            1.1e+04
+                                                   Chi-sq(2) P-val =    0.0000
 ------------------------------------------------------------------------------
-Weak identification test (Cragg-Donald Wald F statistic):             7179.444
-                         (Kleibergen-Paap rk Wald F statistic):       6498.799
-Stock-Yogo weak ID test critical values:  5% maximal IV relative bias    13.91
-                                         10% maximal IV relative bias     9.08
-                                         20% maximal IV relative bias     6.46
-                                         30% maximal IV relative bias     5.39
-                                         10% maximal IV size             22.30
-                                         15% maximal IV size             12.83
-                                         20% maximal IV size              9.54
-                                         25% maximal IV size              7.80
+Weak identification test (Cragg-Donald Wald F statistic):             6231.911
+                         (Kleibergen-Paap rk Wald F statistic):       5853.361
+Stock-Yogo weak ID test critical values: 10% maximal IV size             19.93
+                                         15% maximal IV size             11.59
+                                         20% maximal IV size              8.75
+                                         25% maximal IV size              7.25
 Source: Stock-Yogo (2005).  Reproduced by permission.
 NB: Critical values are for Cragg-Donald F statistic and i.i.d. errors.
 ------------------------------------------------------------------------------
-Hansen J statistic (overidentification test of all instruments):      5259.141
-                                                   Chi-sq(2) P-val =    0.0000
+Hansen J statistic (overidentification test of all instruments):      1204.402
+                                                   Chi-sq(1) P-val =    0.0000
 ------------------------------------------------------------------------------
 Instrumented:         average_fare
 Included instruments: share_nonstop dist_k dist_k2 lnum_fringe
 Excluded instruments: average_distance_rival average_num_destinations_rival
-                      rival_carriers
 Partialled-out:       _cons
                       nb: total SS, model F and R2s are after partialling-out;
                           any small-sample adjustments include partialled-out
@@ -602,31 +705,23 @@ Absorbed degrees of freedom:
 -----------------------------------------------------+
  Absorbed FE | Categories  - Redundant  = Num. Coefs |
 -------------+---------------------------------------|
-      market |      7843           0        7843     |
+ market_code |      7843           0        7843     |
 -----------------------------------------------------+
 
-. 
-. * Store F-statistic from first stage
-. scalar F_stat_IV = e(widstat)
-
-. di as yellow "First-stage F-statistic (IV): " F_stat_IV
-First-stage F-statistic (IV): 6498.7994
-
-. 
 . estimates store IV
 
 . 
-. *-------------------------*
-. * NESTED-LOGIT (no IV)   *
-. *   ln(s_jt) - ln(s_gjt) = α p_jt + x_jt β + σ ln(s_jt|g) + FE + error
-. *   No endogeneity correction - treats price and within-group share as exogenous
-. *-------------------------*
+. // *----------------------------------------------------------*
+. // * NESTED-LOGIT (no IV)                                     *
+. // *   ln(s_jt) - ln(s_0) = α p_jt + x_jt β + σ2 ln(s_jt|h) + σ1 ln(s_h|g) + FE + error
+. // *   No endogeneity correction - treats price and within-group share as exogenous
+. // *----------------------------------------------------------*
 . di as yellow "    ---------  Running Nested-logit (no IV) ---------"
     ---------  Running Nested-logit (no IV) ---------
 
 . 
-. reghdfe lns_minus_lno `var_fare' `X_exog' `var_nest', ///
->     absorb(`FE') vce(robust)
+. reghdfe lns_minus_lno `var_fare' `X_exog' `nest_lv1', ///
+>     absorb(`FE') `clustering_config'
 (MWFE estimator converged in 1 iterations)
 
 HDFE Linear regression                            Number of obs   =  1,636,916
@@ -637,349 +732,40 @@ Absorbing 1 HDFE group                            F(   6,1629067) =   1.38e+07
                                                   Within R-sq.    =     0.9811
                                                   Root MSE        =     0.2425
 
--------------------------------------------------------------------------------
-              |               Robust
-lns_minus_lno | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
---------------+----------------------------------------------------------------
- average_fare |  -.0004863   3.91e-06  -124.50   0.000    -.0004939   -.0004786
-share_nonstop |   .1188749   .0008529   139.38   0.000     .1172034    .1205465
-       dist_k |  -.0469124   .0024149   -19.43   0.000    -.0516455   -.0421793
-      dist_k2 |   .0043188   .0005275     8.19   0.000     .0032848    .0053527
-  lnum_fringe |   .0243305   .0005482    44.39   0.000     .0232561    .0254048
-lns_minus_lng |   .9775556   .0001523  6416.79   0.000      .977257    .9778542
-        _cons |  -5.248843   .0023438 -2239.48   0.000    -5.253437    -5.24425
--------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+                |               Robust
+  lns_minus_lno | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+----------------+----------------------------------------------------------------
+   average_fare |  -.0004863   3.91e-06  -124.50   0.000    -.0004939   -.0004786
+  share_nonstop |   .1188749   .0008529   139.38   0.000     .1172034    .1205465
+         dist_k |  -.0469124   .0024149   -19.43   0.000    -.0516455   -.0421793
+        dist_k2 |   .0043188   .0005275     8.19   0.000     .0032848    .0053527
+    lnum_fringe |   .0243305   .0005482    44.39   0.000     .0232561    .0254048
+lns_minus_ln_jg |   .9775556   .0001523  6416.79   0.000      .977257    .9778542
+          _cons |  -5.248843   .0023438 -2239.48   0.000    -5.253437    -5.24425
+---------------------------------------------------------------------------------
 
 Absorbed degrees of freedom:
 -----------------------------------------------------+
  Absorbed FE | Categories  - Redundant  = Num. Coefs |
 -------------+---------------------------------------|
-      market |      7843           0        7843     |
+ market_code |      7843           0        7843     |
 -----------------------------------------------------+
 
 . 
 . estimates store NL_OLS
 
 . 
-. *-------------------------*
-. * IV NESTED-LOGIT        *
-. *   ln(s_jt) - ln(s_gjt) = α p_jt + x_jt β + σ ln(s_jt|g) + FE + error
-. *   Endogenous: p_jt and ln(s_jt|g). Instruments: Z_core plus functions of rivalry.
-. *   We also include the exogenous X's as their own instruments by default.
-. *-------------------------*
+. // *----------------------------------------------------------*
+. // * IV NESTED-LOGIT - ONE-LEVEL                              *
+. // *   ln(s_jt) - ln(s_0) = α p_jt + x_jt β + σ ln(s_jt|h) + FE + error
+. // *   Endogenous: p_jt and ln(s_jt|g). Instruments: Z_core plus functions of rivalr nest.
+. // *   We also include the exogenous X's as their own instruments by default.
+. // *----------------------------------------------------------*
 . di as yellow "    ---------  Running IV nested-logit (price and ln(s_jt|g) endogenous) ---------"
     ---------  Running IV nested-logit (price and ln(s_jt|g) endogenous) ---------
 
 . 
-. ivreghdfe lns_minus_lno (`var_nest' `var_fare' = `Z_core') `X_exog', ///
->     absorb(`FE')  first savefirst savefp(fsivn_)  vce(robust)
+. ivreghdfe lns_minus_lno (`var_fare' `nest_lv1' = `Z_core') `X_exog', ///
+>     absorb(`FE')  first savefirst savefp(fsivn_)  `clustering_config'
 (MWFE estimator converged in 1 iterations)
-
-Stored estimation results
--------------------------
-------------------------------------------------------------------------------------
-             |           Dependent  Number of        
-        Name | Command    variable     param.  Title 
--------------+----------------------------------------------------------------------
-fsivn_lns_~g | ivreg2    lns_minus_~g       7  First-stage regression: lns_minus_lng
-fsivn_aver~e | ivreg2    average_fare       7  First-stage regression: average_fare
-------------------------------------------------------------------------------------
-
-First-stage regressions
------------------------
-
-
-First-stage regression of lns_minus_lng:
-
-Statistics robust to heteroskedasticity
-Number of obs =                1636916
-------------------------------------------------------------------------------------------------
-                               |               Robust
-                 lns_minus_lng | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
--------------------------------+----------------------------------------------------------------
-        average_distance_rival |   .0016182   .0000124   130.28   0.000     .0015939    .0016426
-average_num_destinations_rival |  -.0192944   .0001545  -124.90   0.000    -.0195972   -.0189917
-                rival_carriers |  -.2889205   .0011123  -259.76   0.000    -.2911005   -.2867405
-                 share_nonstop |    1.88614   .0045067   418.51   0.000     1.877307    1.894973
-                        dist_k |  -3.835727   .0121757  -315.03   0.000    -3.859591   -3.811864
-                       dist_k2 |   .2392889   .0027418    87.28   0.000     .2339152    .2446627
-                   lnum_fringe |  -.0479505   .0038447   -12.47   0.000     -.055486   -.0404151
-------------------------------------------------------------------------------------------------
-F test of excluded instruments:
-  F(  3,1629066) = 26131.59
-  Prob > F      =   0.0000
-Sanderson-Windmeijer multivariate F test of excluded instruments:
-  F(  2,1629066) =  2667.64
-  Prob > F      =   0.0000
-
-
-First-stage regression of average_fare:
-
-Statistics robust to heteroskedasticity
-Number of obs =                1636916
-------------------------------------------------------------------------------------------------
-                               |               Robust
-                  average_fare | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
--------------------------------+----------------------------------------------------------------
-        average_distance_rival |   .0346675   .0008007    43.30   0.000     .0330982    .0362367
-average_num_destinations_rival |  -1.055499   .0087072  -121.22   0.000    -1.072565   -1.038433
-                rival_carriers |  -5.666353    .066857   -84.75   0.000    -5.797391   -5.535316
-                 share_nonstop |  -4.949848    .303995   -16.28   0.000    -5.545668   -4.354029
-                        dist_k |   46.29696   1.845812    25.08   0.000     42.67923    49.91468
-                       dist_k2 |   4.354482   .4784367     9.10   0.000     3.416762    5.292201
-                   lnum_fringe |   3.634389   .2198332    16.53   0.000     3.203524    4.065254
-------------------------------------------------------------------------------------------------
-F test of excluded instruments:
-  F(  3,1629066) =  6498.80
-  Prob > F      =   0.0000
-Sanderson-Windmeijer multivariate F test of excluded instruments:
-  F(  2,1629066) =  2464.45
-  Prob > F      =   0.0000
-
-
-
-Summary results for first-stage regressions
--------------------------------------------
-
-                                           (Underid)            (Weak id)
-Variable     | F(  3,1629066)  P-val| SW Chi-sq(  2) P-val | SW F(  2,1629066)
-lns_minus_ln |   26131.59    0.0000 |     5360.99   0.0000 |     2667.64
-average_fare |    6498.80    0.0000 |     4952.65   0.0000 |     2464.45
-
-NB: first-stage test statistics heteroskedasticity-robust
-
-Stock-Yogo weak ID F test critical values for single endogenous regressor:
-                                    5% maximal IV relative bias    13.91
-                                   10% maximal IV relative bias     9.08
-                                   20% maximal IV relative bias     6.46
-                                   30% maximal IV relative bias     5.39
-                                   10% maximal IV size             22.30
-                                   15% maximal IV size             12.83
-                                   20% maximal IV size              9.54
-                                   25% maximal IV size              7.80
-Source: Stock-Yogo (2005).  Reproduced by permission.
-NB: Critical values are for i.i.d. errors only.
-
-Underidentification test
-Ho: matrix of reduced form coefficients has rank=K1-1 (underidentified)
-Ha: matrix has rank=K1 (identified)
-Kleibergen-Paap rk LM statistic          Chi-sq(2)=4677.15  P-val=0.0000
-
-Weak identification test
-Ho: equation is weakly identified
-Cragg-Donald Wald F statistic                                    1696.17
-Kleibergen-Paap Wald rk F statistic                              1575.41
-
-Stock-Yogo weak ID test critical values for K1=2 and L1=3:
-                                   10% maximal IV size             13.43
-                                   15% maximal IV size              8.18
-                                   20% maximal IV size              6.40
-                                   25% maximal IV size              5.45
-Source: Stock-Yogo (2005).  Reproduced by permission.
-NB: Critical values are for Cragg-Donald F statistic and i.i.d. errors.
-
-Weak-instrument-robust inference
-Tests of joint significance of endogenous regressors B1 in main equation
-Ho: B1=0 and orthogonality conditions are valid
-Anderson-Rubin Wald test           F(3,1629066)=17766.58    P-val=0.0000
-Anderson-Rubin Wald test           Chi-sq(3)=   53556.57    P-val=0.0000
-Stock-Wright LM S statistic        Chi-sq(3)=   50560.76    P-val=0.0000
-
-NB: Underidentification, weak identification and weak-identification-robust
-    test statistics heteroskedasticity-robust
-
-Number of observations               N  =    1636916
-Number of regressors                 K  =          6
-Number of endogenous regressors      K1 =          2
-Number of instruments                L  =          7
-Number of excluded instruments       L1 =          3
-
-IV (2SLS) estimation
---------------------
-
-Estimates efficient for homoskedasticity only
-Statistics robust to heteroskedasticity
-
-                                                      Number of obs =  1636916
-                                                      F(  6,1629067) =  3.7e+06
-                                                      Prob > F      =   0.0000
-Total (centered) SS     =  5064054.029                Centered R2   =   0.9720
-Total (uncentered) SS   =  5064054.029                Uncentered R2 =   0.9720
-Residual SS             =  141661.3992                Root MSE      =    .2949
-
--------------------------------------------------------------------------------
-              |               Robust
-lns_minus_lno | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
---------------+----------------------------------------------------------------
-lns_minus_lng |   .8739886   .0014492   603.07   0.000     .8711481     .876829
- average_fare |  -.0019322   .0000523   -36.95   0.000    -.0020346   -.0018297
-share_nonstop |   .3048378   .0032073    95.04   0.000     .2985515    .3111241
-       dist_k |  -.4330385   .0091243   -47.46   0.000    -.4509218   -.4151553
-      dist_k2 |   .0398465   .0012218    32.61   0.000     .0374518    .0422412
-  lnum_fringe |  -.0334629   .0009859   -33.94   0.000    -.0353952   -.0315306
--------------------------------------------------------------------------------
-Underidentification test (Kleibergen-Paap rk LM statistic):           4677.152
-                                                   Chi-sq(2) P-val =    0.0000
-------------------------------------------------------------------------------
-Weak identification test (Cragg-Donald Wald F statistic):             1696.171
-                         (Kleibergen-Paap rk Wald F statistic):       1575.411
-Stock-Yogo weak ID test critical values: 10% maximal IV size             13.43
-                                         15% maximal IV size              8.18
-                                         20% maximal IV size              6.40
-                                         25% maximal IV size              5.45
-Source: Stock-Yogo (2005).  Reproduced by permission.
-NB: Critical values are for Cragg-Donald F statistic and i.i.d. errors.
-------------------------------------------------------------------------------
-Hansen J statistic (overidentification test of all instruments):       950.347
-                                                   Chi-sq(1) P-val =    0.0000
-------------------------------------------------------------------------------
-Instrumented:         lns_minus_lng average_fare
-Included instruments: share_nonstop dist_k dist_k2 lnum_fringe
-Excluded instruments: average_distance_rival average_num_destinations_rival
-                      rival_carriers
-Partialled-out:       _cons
-                      nb: total SS, model F and R2s are after partialling-out;
-                          any small-sample adjustments include partialled-out
-                          variables in regressor count K
-------------------------------------------------------------------------------
-
-Absorbed degrees of freedom:
------------------------------------------------------+
- Absorbed FE | Categories  - Redundant  = Num. Coefs |
--------------+---------------------------------------|
-      market |      7843           0        7843     |
------------------------------------------------------+
-
-. 
-. * Store F-statistic from first stage
-. scalar F_stat_IV_NL = e(widstat)
-
-. di as yellow "First-stage F-statistic (IV Nested-Logit): " F_stat_IV_NL
-First-stage F-statistic (IV Nested-Logit): 1575.411
-
-. 
-. estimates store IV_NL
-
-. 
-. 
-. *-------------------------*
-. * COLLECT & EXPORT TABLE *
-. *-------------------------*
-. 
-. // export also first stage results for IV nested-logit
-. 
-. esttab  fsivn_`var_fare' using "$OUT/demand_results_fs_fare.tex", replace ///
->     b(4) se(4) label booktabs se star(* 0.10 ** 0.05 *** 0.01)
-(output written to ./src/output//demand_results_fs_fare.tex)
-
-. 
-. esttab fsivn_`var_nest' using "$OUT/demand_results_fs_nest.tex", replace ///
->     b(4) se(4) label booktabs se star(* 0.10 ** 0.05 *** 0.01)
-(output written to ./src/output//demand_results_fs_nest.tex)
-
-. 
-. cap which esttab
-
-. esttab OLS IV NL_OLS IV_NL using "$OUT/demand_results.tex", replace ///
->     b(4) se(4) ar2  label booktabs se star(* 0.10 ** 0.05 *** 0.01) ///
->     keep(`var_fare' share_nonstop dist_k dist_k2 lnum_fringe `var_nest') ///
->     order(`var_fare' share_nonstop dist_k dist_k2 lnum_fringe `var_nest') ///
->     scalars("N Observations" "widstat F-statistic (IV)") ///
->     title("Demand Estimates (Logit and Nested-Logit)") nonotes
-(output written to ./src/output//demand_results.tex)
-
-.         // stats(N r2, fmt(0 3) labels("Observations" "R^2")) ///
-. 
-. display as text "Saved: $OUT/demand_results.tex"
-Saved: ./src/output//demand_results.tex
-
-. 
-. *-------------------------*
-. * ELASTICITIES 
-. *   Own-price elasticity for logit: ε_j = α * p_jt * (1 - s_jt)
-. *   For nested-logit, adjust by 1 - σ*(1 - s_gjt)
-. *-------------------------*
-. di as yellow "    ---------  Calculating elasticities ---------"
-    ---------  Calculating elasticities ---------
-
-. tempvar elast_logit elast_nlogit
-
-. scalar alpha = _b[`var_fare']  // from last model in memory; switch if needed
-
-. 
-. * Using OLS as quick check:
-. est restore OLS
-(results OLS are active now)
-
-. scalar alpha_ols = _b[`var_fare']
-
-. 
-. gen `elast_logit'  = alpha_ols * `var_fare' * (1 - s_jt)
-
-. 
-. * Using nested-logit IV estimate:
-. est restore IV_NL
-(results IV_NL are active now)
-
-. scalar alpha_nl = _b[`var_fare']
-
-. scalar sigma    = _b[`var_nest']
-
-. 
-. gen `elast_nlogit' = alpha_nl * `var_fare' * (1 - s_jt) / (1 - sigma*(1 - s_gjt))
-
-. 
-. sum `elast_logit' `elast_nlogit'
-
-    Variable |        Obs        Mean    Std. dev.       Min        Max
--------------+---------------------------------------------------------
-    __000000 |  1,636,916   -.3860752    .1598623  -4.282915  -.0429605
-    __000001 |  1,636,916   -3.292133    1.384941   -36.0312  -.0916681
-
-. 
-. // Export elasticities
-. qui estpost sum `elast_logit' `elast_nlogit', detail
-
-. esttab using "$OUT/demand_elasticities.tex", replace ///
->     title("Elasticities: Own-price (Logit and Nested-Logit)") ///
->     cells("count mean(fmt(3)) sd(fmt(3)) min(fmt(3)) p25(fmt(3)) p50(fmt(3)) p75(fmt(3)) max(fmt(3))") ///
->     label booktabs nonum ///
->     varlabels(`elast_logit' "Logit Elasticity" `elast_nlogit' "Nested-Logit Elasticity")
-(output written to ./src/output//demand_elasticities.tex)
-
-. 
-. display as text "Saved: $OUT/demand_elasticities.tex"
-Saved: ./src/output//demand_elasticities.tex
-
-. // export histogram of elasticities
-. preserve
-
-. 
-.     keep if `elast_nlogit' < 1 & `elast_nlogit' > -10 // filter for better histogram
-(5,546 observations deleted)
-
-.     histogram `elast_nlogit', ///
->         title("Own-Price Elasticities (Nested-Logit)") ///
->         xtitle("Elasticity") ytitle("Frequency") ///
->         graphregion(color(white)) plotregion(color(white)) ///
->         bin(100) fcolor(navy%60) lcolor(white) lwidth(thin) ///
->         xscale(range(-10 1)) xlabel(-10(2)1)
-(bin=100, start=-9.9999418, width=.09908274)
-
-. 
-.     // # use graph export
-.     graph export "$OUT/elasticity_logit_histogram.pdf", replace
-file /Users/gisellelab/Work/airlines_merger_simulation/src/output//elasticity_logit_histogram.pdf saved as PDF format
-
-. 
-. display as text "Saved: $OUT/elasticity_logit_histogram.pdf"
-Saved: ./src/output//elasticity_logit_histogram.pdf
-
-. 
-. 
-. log close
-      name:  <unnamed>
-       log:  /Users/gisellelab/Work/airlines_merger_simulation/src/logs/demand_estimation.log
-  log type:  text
- closed on:  19 Aug 2025, 19:07:31
--------------------------------------------------------------------------------------------------------------------------
