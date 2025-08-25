@@ -1,0 +1,38 @@
+\begin{table}[htbp]\centering
+\def\sym#1{\ifmmode^{#1}\else\(^{#1}\)\fi}
+\caption{Demand Estimates (Logit and Nested-Logit)}
+\begin{tabular}{l*{5}{c}}
+\toprule
+                    &\multicolumn{1}{c}{(1)}&\multicolumn{1}{c}{(2)}&\multicolumn{1}{c}{(3)}&\multicolumn{1}{c}{(4)}&\multicolumn{1}{c}{(5)}\\
+                    &\multicolumn{1}{c}{$\ln s_{jt}/s_{0t}$}&\multicolumn{1}{c}{$\ln s_{jt}/s_{0t}$}&\multicolumn{1}{c}{$\ln s_{jt}/s_{0t}$}&\multicolumn{1}{c}{$\ln s_{jt}/s_{0t}$}&\multicolumn{1}{c}{$\ln s_{jt}/s_{0t}$}\\
+\midrule
+Average fare (dollars)&     -0.0017\sym{***}&      0.0239\sym{***}&     -0.0005\sym{***}&     -0.0019\sym{***}&     -0.0021\sym{***}\\
+                    &    (0.0000)         &    (0.0002)         &    (0.0000)         &    (0.0001)         &    (0.0001)         \\
+\addlinespace
+Share nonstop flights &      1.9504\sym{***}&      2.1079\sym{***}&      0.1189\sym{***}&      0.3048\sym{***}&      0.2986\sym{***}\\
+                    &    (0.0047)         &    (0.0087)         &    (0.0009)         &    (0.0032)         &    (0.0050)         \\
+\addlinespace
+Average Distance (000s miles)&     -4.1437\sym{***}&     -5.0772\sym{***}&     -0.0469\sym{***}&     -0.4330\sym{***}&     -0.4182\sym{***}\\
+                    &    (0.0139)         &    (0.0435)         &    (0.0024)         &    (0.0091)         &    (0.0135)         \\
+\addlinespace
+Average Distance sqr (000s miles)&      0.2762\sym{***}&      0.1453\sym{***}&      0.0043\sym{***}&      0.0398\sym{***}&      0.0398\sym{***}\\
+                    &    (0.0033)         &    (0.0109)         &    (0.0005)         &    (0.0012)         &    (0.0013)         \\
+\addlinespace
+Log(1 + fringe carriers)&     -0.5032\sym{***}&     -0.4661\sym{***}&      0.0243\sym{***}&     -0.0335\sym{***}&     -0.0322\sym{***}\\
+                    &    (0.0033)         &    (0.0060)         &    (0.0005)         &    (0.0010)         &    (0.0013)         \\
+\addlinespace
+$\ln s_{jt|g}$      &                     &                     &      0.9776\sym{***}&      0.8740\sym{***}&                     \\
+                    &                     &                     &    (0.0002)         &    (0.0014)         &                     \\
+\addlinespace
+$\ln s_{ht|g}$      &                     &                     &                     &                     &      0.8866\sym{***}\\
+                    &                     &                     &                     &                     &    (0.0047)         \\
+\addlinespace
+$\ln s_{jt|h}$      &                     &                     &                     &                     &      0.8753\sym{***}\\
+                    &                     &                     &                     &                     &    (0.0019)         \\
+\midrule
+Observations        &     1636916         &     1636916         &     1636916         &     1636916         &     1636916         \\
+Adjusted \(R^{2}\)  &       0.503         &      -0.723         &       0.983         &       0.972         &       0.972         \\
+F-statistic (IV)    &                     &   6498.7994         &                     &   1575.4110         &    361.5578         \\
+\bottomrule
+\end{tabular}
+\end{table}

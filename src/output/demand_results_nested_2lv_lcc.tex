@@ -1,0 +1,38 @@
+\begin{table}[htbp]\centering
+\def\sym#1{\ifmmode^{#1}\else\(^{#1}\)\fi}
+\caption{Demand Estimates (Logit and Nested-Logit)}
+\begin{tabular}{l*{2}{c}}
+\toprule
+                    &\multicolumn{1}{c}{(1)}&\multicolumn{1}{c}{(2)}\\
+                    &\multicolumn{1}{c}{$\ln s_{jt}/s_{0t}$}&\multicolumn{1}{c}{$\ln s_{jt}/s_{0t}$}\\
+\midrule
+Average fare (dollars)&     -0.0019\sym{***}&     -0.0025\sym{***}\\
+                    &    (0.0001)         &    (0.0001)         \\
+\addlinespace
+Share nonstop flights &      0.3048\sym{***}&      0.2799\sym{***}\\
+                    &    (0.0032)         &    (0.0049)         \\
+\addlinespace
+Average Distance (000s miles)&     -0.4330\sym{***}&     -0.3651\sym{***}\\
+                    &    (0.0091)         &    (0.0139)         \\
+\addlinespace
+Average Distance sqr (000s miles)&      0.0398\sym{***}&      0.0389\sym{***}\\
+                    &    (0.0012)         &    (0.0014)         \\
+\addlinespace
+Log(1 + fringe carriers)&     -0.0335\sym{***}&     -0.0311\sym{***}\\
+                    &    (0.0010)         &    (0.0011)         \\
+\addlinespace
+$\ln s_{jt|g}$      &      0.8740\sym{***}&                     \\
+                    &    (0.0014)         &                     \\
+\addlinespace
+$\ln s_{ht|g}$      &                     &      0.9074\sym{***}\\
+                    &                     &    (0.0043)         \\
+\addlinespace
+$\ln s_{jt|h}$      &                     &      0.8832\sym{***}\\
+                    &                     &    (0.0020)         \\
+\midrule
+Observations        &     1636916         &     1636916         \\
+Adjusted \(R^{2}\)  &       0.972         &       0.970         \\
+F-statistic (IV)    &   1575.4110         &    396.5416         \\
+\bottomrule
+\end{tabular}
+\end{table}
