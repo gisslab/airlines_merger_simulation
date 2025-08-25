@@ -30,9 +30,8 @@ global CODE_DIR      "./src/"                                   // source code d
 
 // If the output dir doesn’t exist, Stata will create on first export
 
-// log close
+cap log close
 log using "${CODE_DIR}logs/processing_data.log", replace
-
 
 // ---------------------- PARAMETERS -------------------------------------------
 global YEARS   "2005/2019"
