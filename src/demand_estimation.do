@@ -195,6 +195,15 @@ bys `id_market' `id_time': egen s_inside_t = total(s_jt)
 gen s_0t = 1 - s_inside_t
 replace s_0t = .0000001 if s_0t<=0  // small epsilon to avoid -inf
 
+sum s_jt s_0t s_inside_t
+
+//     Variable |        Obs        Mean    Std. dev.       Min        Max
+// -------------+---------------------------------------------------------
+//         s_jt |  1,636,916    .0013417    .0058076   6.12e-07   .4734702
+//         s_0t |  1,677,867    .9920027     .015648   .3364701          1
+//   s_inside_t |  1,677,867    .0079973     .015648          0   .6635299
+
+
 * log(S_t): create from `market_size' (which is sqrt(orig_pop*dest_pop))
 gen logS = ln(`market_size_var') // not needed for estimation
 
@@ -248,8 +257,7 @@ gen lns_minus_ln_h = ln(s_j_h)           // Share within sub-nest h// same as ln
 gen lns_minus_ln_g = ln(s_h_g)           // Share of sub-nest h within top nest g// same as ln(s_h) - ln(s_g) //! it's zero if single-level nest
 gen lns_minus_ln_jg = ln(s_j_g)           // Share of top nest g within overall nest j// same as ln(s_g) - ln(s_j)
 
-// let's eliminate singleton mkts to avoid collinearity and issues when ivreghdfe
-bys `id_market' `id_time': keep if _N > 1
+sum lns_minus_lno lns_minus_ln_h lns_minus_ln_g
 
 // *----------------------------------------------------------*
 //  * Other variables X
@@ -270,8 +278,12 @@ bys nest_h: gen int rival_carriers_nest2 = _N - 1
 // *----------------------------------------------------------*
 * Keep a clean estimation sample
 di as yellow "    Initial observations: " _N
+* First filter small shares to avoid numerical issues
 keep if s_jt>min_share & s_0t>min_share& s_h>min_share
 di as yellow "    After share filters: " _N
+* Then eliminate singleton markets (after share filtering may have created new singletons)
+bys `id_market' `id_time': keep if _N > 1
+di as yellow "    After dropping singletons: " _N
 foreach v of varlist `X_core' {
     drop if missing(`v')
 }
