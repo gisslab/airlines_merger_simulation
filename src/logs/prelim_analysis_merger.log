@@ -1,0 +1,704 @@
+----------------------------------------------------------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  /Users/gisellelab/Work/airlines_merger_simulation/src//logs/prelim_analysis_merger.log
+  log type:  text
+ opened on:  17 Sep 2025, 13:05:53
+
+. 
+. clear
+
+. // use "$mainpath/data/airline_data_main.dta"
+. use "$PROC_DATA/airline_data_main.dta", clear
+file ./data/processed/combined//airline_data_main.dta not found
+r(601);
+
+end of do-file
+
+r(601);
+
+. do /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T/StataRun1758132514151.do
+
+. // Final project
+. // Date : 9-15-2025
+. // Reference for nested logit :
+. //  - Train, Kenneth E. (2009). Discrete Choice Methods with Simulation, 2nd ed.
+. //    Cambridge University Press — Chapter 4 “Nested Logit”.
+. //  - Helpful note for share derivatives/elasticities:
+. //     Mansley, R., N. Miller, C. Ryan, and M. Weinberg (2019/2024),
+. //     “Notes on the Nested Logit Demand Model.” (short technical memo)
+. 
+. *global mainpath "/Users/kkang57/Dropbox/Teaching/MS-IO/final_project"
+. 
+. cd "/Users/gisellelab/Work/airlines_merger_simulation"   // <-- adjust this, then run the do-file , My path is 
+/Users/gisellelab/Work/airlines_merger_simulation
+
+. 
+. global PROC_DATA    "./data/processed/combined/"                // processed data
+
+. global CODE_DIR      "./src/"                         
+
+. global OUT      "./src/output/"              // output folder          // source code directory
+
+. // global mainpath "/Users/karamkang/Library/CloudStorage/Dropbox/Teaching/MS-IO/final_project"
+. 
+. // log using "$mainpath/analysis/prelim_analysis.log", replace
+. log using "${CODE_DIR}/logs/prelim_analysis_merger.log", replace
+log file already open
+r(604);
+
+end of do-file
+
+r(604);
+
+. do /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T/StataRun1758132531161.do
+
+. // Final project
+. // Date : 9-15-2025
+. // Reference for nested logit :
+. //  - Train, Kenneth E. (2009). Discrete Choice Methods with Simulation, 2nd ed.
+. //    Cambridge University Press — Chapter 4 “Nested Logit”.
+. //  - Helpful note for share derivatives/elasticities:
+. //     Mansley, R., N. Miller, C. Ryan, and M. Weinberg (2019/2024),
+. //     “Notes on the Nested Logit Demand Model.” (short technical memo)
+. 
+. *global mainpath "/Users/kkang57/Dropbox/Teaching/MS-IO/final_project"
+. 
+. cd "/Users/gisellelab/Work/airlines_merger_simulation"   // <-- adjust this, then run the do-file , My path is 
+/Users/gisellelab/Work/airlines_merger_simulation
+
+. 
+. global PROC_DATA    "./data/processed/combined/"                // processed data
+
+. global CODE_DIR      "./src/"                         
+
+. global OUT      "./src/output/"              // output folder          // source code directory
+
+. // global mainpath "/Users/karamkang/Library/CloudStorage/Dropbox/Teaching/MS-IO/final_project"
+. 
+. // log using "$mainpath/analysis/prelim_analysis.log", replace
+. cap log using "${CODE_DIR}/logs/prelim_analysis_merger.log", replace
+
+. 
+. clear
+
+. // use "$mainpath/data/airline_data_main.dta"
+. use "$PROC_DATA/airline_data_main.dta", clear
+
+. 
+. *---------------------------
+. * 1. preparing the data
+. *---------------------------
+. 
+. * focus on a 5% sub-sample of the data (for computational purposes)
+. set seed 12345
+
+. gen random_uniform = runiform()
+
+. bys market_code: egen rr = mean(random_uniform)
+
+. quietly sum rr, detail
+
+. keep if rr<r(p5)
+(1,594,096 observations deleted)
+
+. 
+. * define markets: time-destination-origin
+. encode carrier, gen(firmid)
+
+. egen marketid = group(year quarter market_code)
+
+. egen marketid2 = group(market_code)
+
+. 
+. * market size: alternatives
+. gen pop_o_d_geo_mean = sqrt(origin_pop * dest_pop)      // geometric mean 
+(1,568 missing values generated)
+
+. gen pop_sum = origin_pop + dest_pop                     // sum
+(1,568 missing values generated)
+
+. gen mean_pop = (origin_pop + dest_pop)/2        // average
+(1,568 missing values generated)
+
+. gen max_pop = max(origin_pop, dest_pop)         // maximum
+(2 missing values generated)
+
+. 
+. * declare market size
+. gen msize = pop_o_d_geo_mean/10
+(1,568 missing values generated)
+
+. gen mshare = total_passengers/msize
+(1,568 missing values generated)
+
+. sum mshare
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+      mshare |     82,203    .0011109    .0024232   1.17e-06   .0507384
+
+. 
+. * nesting groups: alternatives
+. gen inside = 1
+
+. gen nonstop_route = (share_nonstop > 0)  // by non stop vs. connecting
+
+. 
+. * declare nesting groups
+. // gen nest1 = inside // ! comment
+. // gen nest2 = 3 // ! comment
+. // replace nest2 = 1 if legacy == 1 // ! comment
+. replace nest2 = 2 if lcc == 1
+variable nest2 not found
+r(111);
+
+end of do-file
+
+r(111);
+
+. do /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T/StataRun1758132577718.do
+
+. // Final project
+. // Date : 9-15-2025
+. // Reference for nested logit :
+. //  - Train, Kenneth E. (2009). Discrete Choice Methods with Simulation, 2nd ed.
+. //    Cambridge University Press — Chapter 4 “Nested Logit”.
+. //  - Helpful note for share derivatives/elasticities:
+. //     Mansley, R., N. Miller, C. Ryan, and M. Weinberg (2019/2024),
+. //     “Notes on the Nested Logit Demand Model.” (short technical memo)
+. 
+. *global mainpath "/Users/kkang57/Dropbox/Teaching/MS-IO/final_project"
+. 
+. cd "/Users/gisellelab/Work/airlines_merger_simulation"   // <-- adjust this, then run the do-file , My path is 
+/Users/gisellelab/Work/airlines_merger_simulation
+
+. 
+. global PROC_DATA    "./data/processed/combined/"                // processed data
+
+. global CODE_DIR      "./src/"                         
+
+. global OUT      "./src/output/"              // output folder          // source code directory
+
+. // global mainpath "/Users/karamkang/Library/CloudStorage/Dropbox/Teaching/MS-IO/final_project"
+. 
+. // log using "$mainpath/analysis/prelim_analysis.log", replace
+. cap log using "${CODE_DIR}/logs/prelim_analysis_merger.log", replace
+
+. 
+. clear
+
+. // use "$mainpath/data/airline_data_main.dta"
+. use "$PROC_DATA/airline_data_main.dta", clear
+
+. 
+. *---------------------------
+. * 1. preparing the data
+. *---------------------------
+. 
+. * focus on a 5% sub-sample of the data (for computational purposes)
+. set seed 12345
+
+. gen random_uniform = runiform()
+
+. bys market_code: egen rr = mean(random_uniform)
+
+. quietly sum rr, detail
+
+. keep if rr<r(p5)
+(1,594,096 observations deleted)
+
+. 
+. * define markets: time-destination-origin
+. encode carrier, gen(firmid)
+
+. egen marketid = group(year quarter market_code)
+
+. egen marketid2 = group(market_code)
+
+. 
+. * market size: alternatives
+. gen pop_o_d_geo_mean = sqrt(origin_pop * dest_pop)      // geometric mean 
+(1,568 missing values generated)
+
+. gen pop_sum = origin_pop + dest_pop                     // sum
+(1,568 missing values generated)
+
+. gen mean_pop = (origin_pop + dest_pop)/2        // average
+(1,568 missing values generated)
+
+. gen max_pop = max(origin_pop, dest_pop)         // maximum
+(2 missing values generated)
+
+. 
+. * declare market size
+. gen msize = pop_o_d_geo_mean/10
+(1,568 missing values generated)
+
+. gen mshare = total_passengers/msize
+(1,568 missing values generated)
+
+. sum mshare
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+      mshare |     82,203    .0011109    .0024232   1.17e-06   .0507384
+
+. 
+. * nesting groups: alternatives
+. gen inside = 1
+
+. gen nonstop_route = (share_nonstop > 0)  // by non stop vs. connecting
+
+. 
+. * declare nesting groups
+. gen nest1 = inside // ! comment
+
+. gen nest2 = 3 // ! comment
+
+. // replace nest2 = 1 if legacy == 1 // ! comment
+. replace nest2 = 2 if lcc == 1
+(12,128 real changes made)
+
+. 
+. * market/product attributes
+. gen dist_k   = average_distance/1000    // distances in thousands
+
+. gen dist_k2  = dist_k^2                                 // distances in thousands, squared
+
+. gen lnum_fringe = ln(1 + fringe_carriers)
+
+. 
+. * declare market/product attributes to control for
+. local x_exog "share_nonstop dist_k dist_k2 lnum_fringe"
+
+. 
+. * instruments for market share
+. bys marketid nest1 nest2: egen rival_carriers_nest = sum(inside)
+
+. replace rival_carriers_nest = rival_carriers_nest-1 // number of rivals within the nest
+(83,771 real changes made)
+
+. 
+. * declare instruments for price and market share
+. local inst "average_distance_rival average_num_destinations_rival rival_carriers_nest"
+
+. 
+. * set the panel data: product x markets
+. xtset firmid marketid
+
+Panel variable: firmid (unbalanced)
+ Time variable: marketid, 1 to 19748, but with gaps
+         Delta: 1 unit
+
+. 
+. *-------------------------------------
+. * 2. performing a merger simulation
+. *-------------------------------------
+. 
+. * step 1: initializing the merger simulation settings
+. mergersim init, nests(nest1 nest2) price(average_fare) quantity(total_passengers) marketsize(msize) firm(firmid)
+command mergersim is unrecognized
+r(199);
+
+end of do-file
+
+r(199);
+
+. ssc install mergersim
+ssc install: "mergersim" not found at SSC, type search mergersim
+(To find all packages at SSC that start with m, type ssc describe m)
+r(601);
+
+. net from http://www.bjornerstedt.org/stata/mergersim
+----------------------------------------------------------------------------------------------------------------------------------
+http://www.bjornerstedt.org/stata/mergersim/
+Merger Simulation
+----------------------------------------------------------------------------------------------------------------------------------
+
+
+Jonas Bj�rnerstedt, Swedish Competition Authority
+Frank Verboven, University of Leuven
+
+
+PACKAGES you could -net describe-:
+    mergersim         Merger simulation
+----------------------------------------------------------------------------------------------------------------------------------
+
+. net install mergersim, replace
+checking mergersim consistency and verifying not already installed...
+installing into /Users/gisellelab/Library/Application Support/Stata/ado/plus/...
+installation complete.
+
+. do /var/folders/xb/mch0wfzd205d97392nxjwj240000gn/T/StataRun1758132875611.do
+
+. // Final project
+. // Date : 9-15-2025
+. // Reference for nested logit :
+. //  - Train, Kenneth E. (2009). Discrete Choice Methods with Simulation, 2nd ed.
+. //    Cambridge University Press — Chapter 4 “Nested Logit”.
+. //  - Helpful note for share derivatives/elasticities:
+. //     Mansley, R., N. Miller, C. Ryan, and M. Weinberg (2019/2024),
+. //     “Notes on the Nested Logit Demand Model.” (short technical memo)
+. 
+. // Install as: 
+. // net from http://www.bjornerstedt.org/stata/mergersim
+. // net install mergersim, replace
+. 
+. *global mainpath "/Users/kkang57/Dropbox/Teaching/MS-IO/final_project"
+. 
+. cd "/Users/gisellelab/Work/airlines_merger_simulation"   // <-- adjust this, then run the do-file , My path is 
+/Users/gisellelab/Work/airlines_merger_simulation
+
+. 
+. global PROC_DATA    "./data/processed/combined/"                // processed data
+
+. global CODE_DIR      "./src/"                         
+
+. global OUT      "./src/output/"              // output folder          // source code directory
+
+. // global mainpath "/Users/karamkang/Library/CloudStorage/Dropbox/Teaching/MS-IO/final_project"
+. 
+. // log using "$mainpath/analysis/prelim_analysis.log", replace
+. cap log using "${CODE_DIR}/logs/prelim_analysis_merger.log", replace
+
+. 
+. clear
+
+. // use "$mainpath/data/airline_data_main.dta"
+. use "$PROC_DATA/airline_data_main.dta", clear
+
+. 
+. *---------------------------
+. * 1. preparing the data
+. *---------------------------
+. 
+. * focus on a 5% sub-sample of the data (for computational purposes)
+. set seed 12345
+
+. gen random_uniform = runiform()
+
+. bys market_code: egen rr = mean(random_uniform)
+
+. quietly sum rr, detail
+
+. keep if rr<r(p5)
+(1,594,096 observations deleted)
+
+. 
+. * define markets: time-destination-origin
+. encode carrier, gen(firmid)
+
+. egen marketid = group(year quarter market_code)
+
+. egen marketid2 = group(market_code)
+
+. 
+. * market size: alternatives
+. gen pop_o_d_geo_mean = sqrt(origin_pop * dest_pop)      // geometric mean 
+(1,568 missing values generated)
+
+. gen pop_sum = origin_pop + dest_pop                     // sum
+(1,568 missing values generated)
+
+. gen mean_pop = (origin_pop + dest_pop)/2        // average
+(1,568 missing values generated)
+
+. gen max_pop = max(origin_pop, dest_pop)         // maximum
+(2 missing values generated)
+
+. 
+. * declare market size
+. gen msize = pop_o_d_geo_mean/10
+(1,568 missing values generated)
+
+. gen mshare = total_passengers/msize
+(1,568 missing values generated)
+
+. sum mshare
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+      mshare |     82,203    .0011109    .0024232   1.17e-06   .0507384
+
+. 
+. * nesting groups: alternatives
+. gen inside = 1
+
+. gen nonstop_route = (share_nonstop > 0)  // by non stop vs. connecting
+
+. 
+. * declare nesting groups
+. gen nest1 = inside // ! comment
+
+. gen nest2 = 3 // ! comment
+
+. // replace nest2 = 1 if legacy == 1 // ! comment
+. replace nest2 = 2 if lcc == 1
+(12,128 real changes made)
+
+. 
+. * market/product attributes
+. gen dist_k   = average_distance/1000    // distances in thousands
+
+. gen dist_k2  = dist_k^2                                 // distances in thousands, squared
+
+. gen lnum_fringe = ln(1 + fringe_carriers)
+
+. 
+. * declare market/product attributes to control for
+. local x_exog "share_nonstop dist_k dist_k2 lnum_fringe"
+
+. 
+. * instruments for market share
+. bys marketid nest1 nest2: egen rival_carriers_nest = sum(inside)
+
+. replace rival_carriers_nest = rival_carriers_nest-1 // number of rivals within the nest
+(83,771 real changes made)
+
+. 
+. * declare instruments for price and market share
+. local inst "average_distance_rival average_num_destinations_rival rival_carriers_nest"
+
+. 
+. * set the panel data: product x markets
+. xtset firmid marketid
+
+Panel variable: firmid (unbalanced)
+ Time variable: marketid, 1 to 19748, but with gaps
+         Delta: 1 unit
+
+. 
+. *-------------------------------------
+. * 2. performing a merger simulation
+. *-------------------------------------
+. 
+. * step 1: initializing the merger simulation settings
+. mergersim init, nests(nest1 nest2) price(average_fare) quantity(total_passengers) marketsize(msize) firm(firmid)
+--------------------------------------------------------------------------------
+MERGERSIM: Merger Simulation Program
+Version 1.0, Revision: 218 
+--------------------------------------------------------------------------------
+Unit demand two-level nested logit
+
+                  Depvar              Price               Group shares
+                  --------------------------------------------------------------
+                  M_ls                average_fare        M_lsjh M_lshg
+--------------------------------------------------------------------------------
+Variables generated: M_ls M_lsjh M_lshg
+--------------------------------------------------------------------------------
+
+. 
+. * step 2: nested logit demand model estimation
+. ivreghdfe M_ls (average_fare M_lsjh M_lshg = `inst') `x_exog', absorb(marketid2) cluster(marketid2)
+(MWFE estimator converged in 1 iterations)
+
+IV (2SLS) estimation
+--------------------
+
+Estimates efficient for homoskedasticity only
+Statistics robust to heteroskedasticity and clustering on marketid2
+
+Number of clusters (marketid2) =   1155               Number of obs =    82203
+                                                      F(  7,  1154) = 11903.45
+                                                      Prob > F      =   0.0000
+Total (centered) SS     =  224776.5735                Centered R2   =   0.9604
+Total (uncentered) SS   =  224776.5735                Uncentered R2 =   0.9604
+Residual SS             =  8898.733784                Root MSE      =     .329
+
+-------------------------------------------------------------------------------
+              |               Robust
+         M_ls | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+--------------+----------------------------------------------------------------
+ average_fare |  -.0015325   .0012807    -1.20   0.232    -.0040453    .0009802
+       M_lsjh |   .8121594   .0453824    17.90   0.000     .7231181    .9012007
+       M_lshg |   .7873825   .0780963    10.08   0.000      .634156    .9406091
+share_nonstop |   .4176188   .1161047     3.60   0.000     .1898189    .6454186
+       dist_k |  -.6550103   .2288453    -2.86   0.004     -1.10401   -.2060108
+      dist_k2 |   .0415232   .0135764     3.06   0.002     .0148861    .0681604
+  lnum_fringe |  -.0615279   .0261071    -2.36   0.019    -.1127506   -.0103051
+-------------------------------------------------------------------------------
+Underidentification test (Kleibergen-Paap rk LM statistic):             13.885
+                                                   Chi-sq(1) P-val =    0.0002
+------------------------------------------------------------------------------
+Weak identification test (Cragg-Donald Wald F statistic):               50.328
+                         (Kleibergen-Paap rk Wald F statistic):          5.123
+Stock-Yogo weak ID test critical values:                       <not available>
+------------------------------------------------------------------------------
+Hansen J statistic (overidentification test of all instruments):         0.000
+                                                 (equation exactly identified)
+------------------------------------------------------------------------------
+Instrumented:         average_fare M_lsjh M_lshg
+Included instruments: share_nonstop dist_k dist_k2 lnum_fringe
+Excluded instruments: average_distance_rival average_num_destinations_rival
+                      rival_carriers_nest
+Partialled-out:       _cons
+                      nb: total SS, model F and R2s are after partialling-out;
+                          any small-sample adjustments include partialled-out
+                          variables in regressor count K
+------------------------------------------------------------------------------
+
+Absorbed degrees of freedom:
+-----------------------------------------------------+
+ Absorbed FE | Categories  - Redundant  = Num. Coefs |
+-------------+---------------------------------------|
+   marketid2 |      1155        1155           0    *|
+-----------------------------------------------------+
+* = FE nested within cluster; treated as redundant for DoF computation
+
+. 
+. * step 3: analyzing premerger market conditions
+. mergersim market if year == 2013
+---------------------------------------------------------------------------------
+Supply: Bertrand competition
+Demand: Unit demand two-level nested logit
+--------------------------------------------------------------------------------
+Demand estimate
+ivreghdfe M_ls (average_fare M_lsjh M_lshg = average_distance_rival average_num_destinations_rival rival_carriers_nest) share_nons
+> top dist_k dist_k2 lnum_fringe, absorb(marketid2) cluster(marketid2)
+Dependent variable: M_ls
+--------------------------------------------------------------------------------
+
+Parameters
+
+alpha = -0.002
+sigma1 = 0.812 
+sigma2 = 0.787 
+----------------------------------------------------------------
+Own- and Cross-Price Elasticities:  unweighted market averages
+
+    Variable |      Mean        SD       Min       Max
+-------------+----------------------------------------
+       M_ejj |    -1.544     0.810   -13.107    -0.083
+       M_ejk |     0.392     0.419     0.000     2.804
+       M_ejl |     0.315     0.359     0.000     2.402
+       M_ejm |     0.000     0.001     0.000     0.015
+------------------------------------------------------
+Observations: 4624
+----------------------------------------------------------------
+
+Pre-merger Market Conditions 
+Unweighted averages by firmid
+
+---------------------------------------------------------------------------------
+              firmid |       average_fare      Marginal costs   Pre-merger Lerner
+---------------------+-----------------------------------------------------------
+                  3M |            146.491              23.409               0.868
+                  AA |            252.988              92.825               0.715
+                  AS |            297.039             107.059               0.871
+                  B6 |            209.382              50.209               0.914
+                  BA |            162.338              39.744               1.310
+                  DL |            250.183              50.224               0.871
+                  F9 |            169.711               3.940               1.155
+                  FL |            175.364              30.865               0.939
+                  G4 |            107.333            -300.764               4.272
+                  HA |            395.736             197.155               0.535
+                  JL |            361.295             238.531               0.340
+                  LH |            291.069             168.368               0.422
+                  NK |            104.128             -90.164               2.368
+                  QF |            141.839              19.244               1.099
+                  QR |            312.380             189.783               0.491
+                  SY |            176.202              -8.514               1.363
+                  UA |            252.760              87.830               0.709
+                  US |            255.457              82.676               0.767
+                  VX |            224.698              91.801               0.681
+                  WN |            194.284             -21.466               1.232
+                  ZK |            360.337             230.640               0.360
+---------------------------------------------------------------------------------
+Variables generated: M_costs M_delta 
+---------------------------------------------------------------------------------
+
+. 
+. * step 4: simulating the merger effects
+. *         consider a merger between AA (buyer) and US (seller)
+. *         note: AA and US merger approved in Dec 2013
+. mergersim simulate if year == 2014, seller(61) buyer(6) detail
+Simulation did not converge.
+Error: 
+
+---------------------------------------------------------------------------------
+Merger Simulation
+
+                                            Simulation method: Newton
+                        Buyer     Seller    Periods/markets: 1160
+Firm                    6         61        Average number of iterations: 25.64 
+                                            Max number of iterations: 1000  
+Marginal cost savings                       Max price change in last it: 3.0e-08  
+---------------------------------------------------------------------------------
+
+Prices
+Unweighted averages by firmid
+
+---------------------------------------------------------------------------------
+              firmid |         Pre-merger         Post-merger     Relative change
+---------------------+-----------------------------------------------------------
+                  AA |            250.934             298.086               0.227
+                  AS |            299.348             299.443               0.000
+                  B6 |            213.340             213.423               0.000
+                  BA |            139.953             139.953               0.000
+                  DL |            258.203             259.171               0.004
+                  EV |            697.463             697.463               0.000
+                  F9 |            182.246             182.323               0.000
+                  FL |            192.030             192.068               0.000
+                  G4 |             99.168              99.278               0.001
+                  HA |            441.677             441.878               0.000
+                  JJ |            200.964             200.964               0.000
+                  NK |            110.363             110.646               0.004
+                  QR |            562.050             562.052               0.000
+                  SY |            192.342             192.344               0.000
+                  UA |            257.003             257.598               0.002
+                  US |            246.194             287.480               0.193
+                  VX |            175.525             175.529               0.000
+                  WN |            199.838             200.436               0.003
+                  ZK |            298.654             298.654              -0.000
+---------------------------------------------------------------------------------
+Variables generated: M_price2 M_quantity2 M_price_ch (Other M_ variables dropped)
+---------------------------------------------------------------------------------
+
+Market shares by quantity
+Unweighted averages by firmid
+
+---------------------------------------------------------------------------------
+              firmid |         Pre-merger         Post-merger          Difference
+---------------------+-----------------------------------------------------------
+                  AA |              0.171               0.167              -0.004
+                  AS |              0.239               0.240               0.001
+                  B6 |              0.147               0.148               0.001
+                  BA |              0.000               0.000               0.000
+                  DL |              0.330               0.335               0.005
+                  EV |              0.000               0.000               0.000
+                  F9 |              0.138               0.139               0.001
+                  FL |              0.023               0.024               0.000
+                  G4 |              0.745               0.745               0.000
+                  HA |              0.210               0.211               0.002
+                  JJ |              0.000               0.000               0.000
+                  NK |              0.190               0.192               0.002
+                  QR |              0.001               0.001               0.000
+                  SY |              0.204               0.204               0.000
+                  UA |              0.201               0.205               0.004
+                  US |              0.200               0.194              -0.006
+                  VX |              0.084               0.084               0.000
+                  WN |              0.322               0.325               0.003
+                  ZK |              0.031               0.031              -0.000
+---------------------------------------------------------------------------------
+
+--------------------------------------------------
+                        Pre-merger     Post-merger
+--------------------------------------------------
+HHS:                     5194           5350
+C4:                     96.44          97.35
+C8:                     97.93          97.93
+--------------------------------------------------
+----------------------------------------
+                                 Change
+----------------------------------------
+Consumer surplus:                  -638
+Producer surplus:                 1,950
+----------------------------------------
+
+. 
+. log close
+      name:  <unnamed>
+       log:  /Users/gisellelab/Work/airlines_merger_simulation/src//logs/prelim_analysis_merger.log
+  log type:  text
+ closed on:  17 Sep 2025, 13:15:51
+----------------------------------------------------------------------------------------------------------------------------------

@@ -1,0 +1,348 @@
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  /Users/karamkang/Library/CloudStorage/Dropbox/Teaching/MS-IO/final_project/analysis/prelim_analysis.log
+  log type:  text
+ opened on:  15 Sep 2025, 21:01:07
+
+. 
+. clear
+
+. use "$mainpath/data/airline_data_main.dta"
+
+. 
+. *---------------------------
+. * 1. preparing the data
+. *---------------------------
+. 
+. * focus on a 5% sub-sample of the data (for computational purposes)
+. set seed 12345
+
+. gen random_uniform = runiform()
+
+. bys market_code: egen rr = mean(random_uniform)
+
+. quietly sum rr, detail
+
+. keep if rr<r(p5)
+(1,594,096 observations deleted)
+
+. 
+. * define markets: time-destination-origin
+. encode carrier, gen(firmid)
+
+. egen marketid = group(year quarter market_code)
+
+. egen marketid2 = group(market_code)
+
+. 
+. * market size: alternatives
+. gen pop_o_d_geo_mean = sqrt(origin_pop * dest_pop)      // geometric mean 
+(1,568 missing values generated)
+
+. gen pop_sum = origin_pop + dest_pop                     // sum
+(1,568 missing values generated)
+
+. gen mean_pop = (origin_pop + dest_pop)/2        // average
+(1,568 missing values generated)
+
+. gen max_pop = max(origin_pop, dest_pop)         // maximum
+(2 missing values generated)
+
+. 
+. * declare market size
+. gen msize = pop_o_d_geo_mean/10
+(1,568 missing values generated)
+
+. gen mshare = total_passengers/msize
+(1,568 missing values generated)
+
+. sum mshare
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+      mshare |     82,203    .0011109    .0024232   1.17e-06   .0507384
+
+. 
+. * nesting groups: alternatives
+. gen inside = 1
+
+. gen nonstop_route = (share_nonstop > 0)  // by non stop vs. connecting
+
+. 
+. * declare nesting groups
+. gen nest1 = inside
+
+. gen nest2 = 3
+
+. replace nest2 = 1 if legacy == 1
+(67,449 real changes made)
+
+. replace nest2 = 2 if lcc == 1
+(12,128 real changes made)
+
+. 
+. * market/product attributes
+. gen dist_k   = average_distance/1000    // distances in thousands
+
+. gen dist_k2  = dist_k^2                                 // distances in thousands, squared
+
+. gen lnum_fringe = ln(1 + fringe_carriers)
+
+. 
+. * declare market/product attributes to control for
+. local x_exog "share_nonstop dist_k dist_k2 lnum_fringe"
+
+. 
+. * instruments for market share
+. bys marketid nest1 nest2: egen rival_carriers_nest = sum(inside)
+
+. replace rival_carriers_nest = rival_carriers_nest-1 // number of rivals within the nest
+(83,771 real changes made)
+
+. 
+. * declare instruments for price and market share
+. local inst "average_distance_rival average_num_destinations_rival rival_carriers_nest"
+
+. 
+. * set the panel data: product x markets
+. xtset firmid marketid
+
+Panel variable: firmid (unbalanced)
+ Time variable: marketid, 1 to 19748, but with gaps
+         Delta: 1 unit
+
+. 
+. *-------------------------------------
+. * 2. performing a merger simulation
+. *-------------------------------------
+. 
+. * step 1: initializing the merger simulation settings
+. mergersim init, nests(nest1 nest2) price(average_fare) quantity(total_passengers) marketsize(msize) firm(firmid)
+--------------------------------------------------------------------------------
+MERGERSIM: Merger Simulation Program
+Version 1.0, Revision: 218 
+--------------------------------------------------------------------------------
+Unit demand two-level nested logit
+
+                  Depvar              Price               Group shares
+                  --------------------------------------------------------------
+                  M_ls                average_fare        M_lsjh M_lshg
+--------------------------------------------------------------------------------
+Variables generated: M_ls M_lsjh M_lshg
+--------------------------------------------------------------------------------
+
+. 
+. * step 2: nested logit demand model estimation
+. ivreghdfe M_ls (average_fare M_lsjh M_lshg = `inst') `x_exog', absorb(marketid2) cluster(marketid2)
+(MWFE estimator converged in 1 iterations)
+
+IV (2SLS) estimation
+--------------------
+
+Estimates efficient for homoskedasticity only
+Statistics robust to heteroskedasticity and clustering on marketid2
+
+Number of clusters (marketid2) =   1155               Number of obs =    82203
+                                                      F(  7,  1154) = 12297.75
+                                                      Prob > F      =   0.0000
+Total (centered) SS     =  224776.5735                Centered R2   =   0.9605
+Total (uncentered) SS   =  224776.5735                Uncentered R2 =   0.9605
+Residual SS             =  8887.193458                Root MSE      =    .3288
+
+-------------------------------------------------------------------------------
+              |               Robust
+         M_ls | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+--------------+----------------------------------------------------------------
+ average_fare |  -.0017007   .0012128    -1.40   0.161    -.0040803    .0006789
+       M_lsjh |   .8132666   .0408739    19.90   0.000     .7330711    .8934621
+       M_lshg |   .8043692   .0650182    12.37   0.000     .6768021    .9319364
+share_nonstop |   .4099625   .1064703     3.85   0.000     .2010656    .6188595
+       dist_k |  -.6405113   .2031196    -3.15   0.002    -1.039037   -.2419862
+      dist_k2 |   .0414133   .0131292     3.15   0.002     .0156535    .0671731
+  lnum_fringe |  -.0661226   .0309476    -2.14   0.033    -.1268424   -.0054028
+-------------------------------------------------------------------------------
+Underidentification test (Kleibergen-Paap rk LM statistic):             13.121
+                                                   Chi-sq(1) P-val =    0.0003
+------------------------------------------------------------------------------
+Weak identification test (Cragg-Donald Wald F statistic):               56.877
+                         (Kleibergen-Paap rk Wald F statistic):          4.981
+Stock-Yogo weak ID test critical values:                       <not available>
+------------------------------------------------------------------------------
+Hansen J statistic (overidentification test of all instruments):         0.000
+                                                 (equation exactly identified)
+------------------------------------------------------------------------------
+Instrumented:         average_fare M_lsjh M_lshg
+Included instruments: share_nonstop dist_k dist_k2 lnum_fringe
+Excluded instruments: average_distance_rival average_num_destinations_rival
+                      rival_carriers_nest
+Partialled-out:       _cons
+                      nb: total SS, model F and R2s are after partialling-out;
+                          any small-sample adjustments include partialled-out
+                          variables in regressor count K
+------------------------------------------------------------------------------
+
+Absorbed degrees of freedom:
+-----------------------------------------------------+
+ Absorbed FE | Categories  - Redundant  = Num. Coefs |
+-------------+---------------------------------------|
+   marketid2 |      1155        1155           0    *|
+-----------------------------------------------------+
+* = FE nested within cluster; treated as redundant for DoF computation
+
+. 
+. * step 3: analyzing premerger market conditions
+. mergersim market if year == 2013
+---------------------------------------------------------------------------------
+Supply: Bertrand competition
+Demand: Unit demand two-level nested logit
+--------------------------------------------------------------------------------
+Demand estimate
+ivreghdfe M_ls (average_fare M_lsjh M_lshg = average_distance_rival average_num_destinations_rival rival_carriers_nest) share_nonstop dist_k dist_k2 lnum_fringe, abs
+> orb(marketid2) cluster(marketid2)
+Dependent variable: M_ls
+--------------------------------------------------------------------------------
+
+Parameters
+
+alpha = -0.002
+sigma1 = 0.813 
+sigma2 = 0.804 
+----------------------------------------------------------------
+Own- and Cross-Price Elasticities:  unweighted market averages
+
+    Variable |      Mean        SD       Min       Max
+-------------+----------------------------------------
+       M_ejj |    -1.735     0.899   -14.632    -0.092
+       M_ejk |     0.426     0.465     0.000     3.134
+       M_ejl |     0.388     0.442     0.000     2.959
+       M_ejm |     0.000     0.001     0.000     0.016
+------------------------------------------------------
+Observations: 4624
+----------------------------------------------------------------
+
+Pre-merger Market Conditions 
+Unweighted averages by firmid
+
+---------------------------------------------------------------------------------
+              firmid |       average_fare      Marginal costs   Pre-merger Lerner
+---------------------+-----------------------------------------------------------
+                  3M |            146.491              33.890               0.795
+                  AA |            252.988             110.171               0.636
+                  AS |            297.039             126.362               0.783
+                  B6 |            209.382              72.496               0.786
+                  BA |            162.338              47.291               1.229
+                  DL |            250.183              71.648               0.777
+                  F9 |            169.711              28.771               0.985
+                  FL |            175.364              40.884               0.871
+                  G4 |            107.333            -264.110               3.891
+                  HA |            395.736             217.594               0.480
+                  JL |            361.295             246.086               0.319
+                  LH |            291.069             175.919               0.396
+                  NK |            104.128             -65.139               2.045
+                  QF |            141.839              27.673               1.019
+                  QR |            312.380             198.232               0.458
+                  SY |            176.202              18.230               1.157
+                  UA |            252.760             105.570               0.632
+                  US |            255.457             100.829               0.686
+                  VX |            224.698             100.172               0.638
+                  WN |            194.284              10.509               1.052
+                  ZK |            360.337             238.696               0.338
+---------------------------------------------------------------------------------
+Variables generated: M_costs M_delta 
+---------------------------------------------------------------------------------
+
+. 
+. * step 4: simulating the merger effects
+. *         consider a merger between AA (buyer) and US (seller)
+. *         note: AA and US merger approved in Dec 2013
+. mergersim simulate if year == 2014, seller(61) buyer(6) detail
+Simulation did not converge.
+Error: 
+
+---------------------------------------------------------------------------------
+Merger Simulation
+
+                                            Simulation method: Newton
+                        Buyer     Seller    Periods/markets: 1160
+Firm                    6         61        Average number of iterations: 25.62 
+                                            Max number of iterations: 1000  
+Marginal cost savings                       Max price change in last it: 1.0e-08  
+---------------------------------------------------------------------------------
+
+Prices
+Unweighted averages by firmid
+
+---------------------------------------------------------------------------------
+              firmid |         Pre-merger         Post-merger     Relative change
+---------------------+-----------------------------------------------------------
+                  AA |            250.934             292.846               0.202
+                  AS |            299.348             299.431               0.000
+                  B6 |            213.340             213.412               0.000
+                  BA |            139.953             139.953               0.000
+                  DL |            258.203             259.050               0.003
+                  EV |            697.463             697.463               0.000
+                  F9 |            182.246             182.316               0.000
+                  FL |            192.030             192.059               0.000
+                  G4 |             99.168              99.290               0.001
+                  HA |            441.677             441.858               0.000
+                  JJ |            200.964             200.964               0.000
+                  NK |            110.363             110.603               0.003
+                  QR |            562.050             562.051               0.000
+                  SY |            192.342             192.344               0.000
+                  UA |            257.003             257.522               0.002
+                  US |            246.194             282.809               0.171
+                  VX |            175.525             175.528               0.000
+                  WN |            199.838             200.334               0.002
+                  ZK |            298.654             298.654               0.000
+---------------------------------------------------------------------------------
+Variables generated: M_price2 M_quantity2 M_price_ch (Other M_ variables dropped)
+---------------------------------------------------------------------------------
+
+Market shares by quantity
+Unweighted averages by firmid
+
+---------------------------------------------------------------------------------
+              firmid |         Pre-merger         Post-merger          Difference
+---------------------+-----------------------------------------------------------
+                  AA |              0.171               0.167              -0.004
+                  AS |              0.239               0.240               0.001
+                  B6 |              0.147               0.148               0.001
+                  BA |              0.000               0.000               0.000
+                  DL |              0.330               0.334               0.005
+                  EV |              0.000               0.000               0.000
+                  F9 |              0.138               0.139               0.001
+                  FL |              0.023               0.024               0.000
+                  G4 |              0.745               0.745               0.000
+                  HA |              0.210               0.211               0.002
+                  JJ |              0.000               0.000               0.000
+                  NK |              0.190               0.192               0.002
+                  QR |              0.001               0.001               0.000
+                  SY |              0.204               0.204               0.000
+                  UA |              0.201               0.205               0.004
+                  US |              0.200               0.194              -0.006
+                  VX |              0.084               0.084               0.000
+                  WN |              0.322               0.325               0.003
+                  ZK |              0.031               0.031               0.000
+---------------------------------------------------------------------------------
+
+--------------------------------------------------
+                        Pre-merger     Post-merger
+--------------------------------------------------
+HHS:                     5194           5350
+C4:                     96.44          97.35
+C8:                     97.93          97.93
+--------------------------------------------------
+----------------------------------------
+                                 Change
+----------------------------------------
+Consumer surplus:                  -505
+Producer surplus:                 1,681
+----------------------------------------
+
+. 
+. log close
+      name:  <unnamed>
+       log:  /Users/karamkang/Library/CloudStorage/Dropbox/Teaching/MS-IO/final_project/analysis/prelim_analysis.log
+  log type:  text
+ closed on:  15 Sep 2025, 21:02:35
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------
