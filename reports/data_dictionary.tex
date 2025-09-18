@@ -1,0 +1,210 @@
+\documentclass[11pt]{article}
+\usepackage[margin=0.9in]{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{url}
+\usepackage{amsmath}
+\usepackage{hyperref}
+
+\title{\textbf{Airline Market Data Dictionary}}
+\author{U.S.\ Airline Industry Dataset (2005--2019)}
+\date{September 2025}
+
+\begin{document}
+
+\maketitle
+
+\section{Data Construction Process}
+
+This dataset was constructed by processing quarterly DB1B Market \textbf{10\% sample} files from the U.S.\ Department of Transportation's Bureau of Transportation Statistics and merging with auxiliary data on airport characteristics, demographics, and market structure. The DB1B 10\% sample is the standard public-use file provided by BTS.
+
+\subsection{Data Sources}
+\begin{itemize}
+\item \textbf{Primary}: U.S. DOT Bureau of Transportation Statistics, Airline Origin and Destination Survey (DB1B Market)
+\item \textbf{Website}: \url{https://www.transtats.bts.gov/DatabaseInfo.asp?DB_ID=125}
+\item \textbf{Auxiliary}: Census population data, airport characteristics, vacation destinations
+\end{itemize}
+
+\subsection{Processing Steps}
+\begin{enumerate}
+\item \textbf{Market Definition}: Origin-destination city pairs based on city market IDs
+\item \textbf{Time Aggregation}: Quarterly data aggregated from individual trip records
+\item \textbf{Geographic Scope}: Limited to Continental U.S. (CONUS) airports
+\item \textbf{Market Size Filter}: Markets with $\geq$20 passengers/day on average ($\geq$182.5 quarterly passengers in 10\% sample)
+\item \textbf{Price Filter}: Real fares between \$25-\$2,500 (2019 dollars)
+\item \textbf{Competition Filter}: Excludes monopoly markets (rival\_carriers $>$ 0)
+\end{enumerate}
+
+\subsection{Dataset Overview}
+\begin{itemize}
+\item \textbf{File}: \texttt{airline\_data\_main.dta}
+\item \textbf{Period}: 2005 Q1 - 2019 Q4 (60 quarters)
+\item \textbf{Level}: Product-market-time (carrier-route-quarter)
+\item \textbf{Observations}: 1,677,867 product-market-quarter combinations
+\item \textbf{Markets}: 8,059 unique origin-destination city pairs
+\item \textbf{Carriers}: 134 unique airline codes
+\end{itemize}
+
+\section{Variable Definitions}
+
+\subsection{Identifiers and Time}
+
+\begin{longtable}[c]{p{5.1cm}p{1.8cm}p{7.7cm}}
+\toprule
+\textbf{Variable} & \textbf{Type} & \textbf{Description} \\
+\midrule
+\endhead
+
+\texttt{year} & integer & Year (2005-2019) \\
+\texttt{quarter} & integer & Quarter (1-4) \\
+\texttt{time} & string & Time identifier in format YYYY-Q \\
+\texttt{origin} & integer & Origin city market ID (BTS designation) \\
+\texttt{destination} & integer & Destination city market ID (BTS designation) \\
+\texttt{carrier} & string & Two-letter airline code (IATA/ICAO standard) \\
+\texttt{market\_code} & string & Origin-destination market identifier \\
+\texttt{market\_name} & string & Human-readable market name (e.g., ``NYC-LAX'') \\
+
+\bottomrule
+\end{longtable}
+
+\subsection{Demand and Price Variables}
+
+\begin{longtable}[c]{p{5.1cm}p{1.8cm}p{7.7cm}}
+\toprule
+\textbf{Variable} & \textbf{Type} & \textbf{Description} \\
+\midrule
+\endhead
+
+\texttt{total\_passengers} & integer & Total quarterly passengers for this carrier on this route \\
+\texttt{average\_fare} & float & Average ticket price in 2019 real dollars. Constructed as passenger-weighted average of individual fares \\
+\texttt{share\_nonstop} & float & Share of carrier's passengers on nonstop flights (0-1) \\
+\texttt{average\_distance} & float & Average flight distance in miles, including connections \\
+\texttt{average\_nonstop\_miles} & float & Average nonstop flight distance in miles \\
+\texttt{average\_extra\_miles} & float & Additional miles due to connections. Calculated as average\_distance - average\_nonstop\_miles \\
+
+\bottomrule
+\end{longtable}
+
+\subsection{City Demographics and Airport Characteristics}
+
+\begin{longtable}[c]{p{5.1cm}p{1.8cm}p{7.7cm}}
+\toprule
+\textbf{Variable} & \textbf{Type} & \textbf{Description} \\
+\midrule
+\endhead
+
+\texttt{origin\_pop} & float & Origin metropolitan area population. Merged from Census/BEA data by airport-year \\
+\texttt{dest\_pop} & float & Destination metropolitan area population. Merged from Census/BEA data by airport-year \\
+\texttt{pop\_o\_d\_geo\_mean} & float & Geometric mean of endpoint populations: $\sqrt{\text{origin\_pop} \times \text{dest\_pop}}$. Primary market size measure \\
+\texttt{pop\_sum} & float & Sum of endpoint populations: origin\_pop + dest\_pop \\
+\texttt{mean\_pop} & float & Average of endpoint populations: (origin\_pop + dest\_pop)/2 \\
+\texttt{max\_pop} & float & Maximum of endpoint populations: max(origin\_pop, dest\_pop) \\
+
+% \bottomrule
+% \end{longtable}
+
+% \subsection{Airport and Route Characteristics}
+
+% \begin{longtable}[c]{p{5.1cm}p{1.8cm}p{7.7cm}}
+% \toprule
+% \textbf{Variable} & \textbf{Type} & \textbf{Description} \\
+% \midrule
+% \endhead
+
+\texttt{origin\_hub} & binary & Origin airport is a major hub. Based on T\_MASTER\_CORD classification \\
+\texttt{destination\_hub} & binary & Destination airport is a major hub \\
+\texttt{origin\_slot\_controlled} & binary & Origin airport has slot restrictions (capacity constraints) \\
+\texttt{destination\_slot\_controlled} & binary & Destination airport has slot restrictions \\
+\texttt{destination\_vacation} & binary & Destination city is classified as a vacation/leisure market \\
+
+\bottomrule
+\end{longtable}
+
+\subsection{Carrier Types and Classification}
+
+\begin{longtable}[c]{p{5.1cm}p{1.8cm}p{7.7cm}}
+\toprule
+\textbf{Variable} & \textbf{Type} & \textbf{Description} \\
+\midrule
+\endhead
+
+\texttt{major} & binary & Major carrier indicator. Large network carriers with extensive route networks \\
+\texttt{legacy} & binary & Legacy carrier indicator. Traditional full-service carriers (American, Delta, United, etc.) \\
+\texttt{lcc} & binary & Low-cost carrier indicator. Discount/low-cost carriers (Southwest, JetBlue, etc.) \\
+\texttt{fringe} & binary & Fringe carrier indicator. Calculated as 1 - major \\
+
+\bottomrule
+\end{longtable}
+
+\subsection{Competition and Network Structure}
+
+\begin{longtable}[c]{p{5.1cm}p{1.8cm}p{7.7cm}}
+\toprule
+\textbf{Variable} & \textbf{Type} & \textbf{Description} \\
+\midrule
+\endhead
+
+% \multicolumn{3}{l}{\textbf{Market Competition Measures}} \\
+\texttt{fringe\_carriers} & integer & Number of fringe carriers serving this market in this quarter \\
+\texttt{rival\_carriers} & integer & Number of rival carriers in market (total carriers minus focal carrier) \\
+\texttt{presence} & float & Carrier's passenger share at origin airport. Calculated as carrier\_passengers\_at\_origin / total\_passengers\_at\_origin \\
+\texttt{total\_presence} & float & Sum of all carriers' presence measures in this market \\
+
+% \multicolumn{3}{l}{\textbf{Network Size Variables}} \\
+\texttt{num\_destinations} & integer & Number of destinations served by carrier from this origin airport in this quarter \\
+\texttt{num\_markets} & integer & Number of distinct origin-destination markets served by carrier in this quarter \\
+\texttt{total\_num\_destinations} & integer & Total destinations served by all carriers from this origin \\
+\texttt{total\_num\_markets} & integer & Total markets served by all carriers \\
+
+% \multicolumn{3}{l}{\textbf{Rival Carrier Characteristics}} \\
+\texttt{average\_distance\_rival} & float & Average distance flown by rival carriers in this market. Calculated as leave-one-out mean: $\frac{\sum \text{rival\_distance} - \text{own\_distance}}{N-1}$ \\
+\texttt{average\_presence\_rival} & float & Average presence of rival carriers at origin airport. Leave-one-out mean of presence measures \\
+\texttt{average\_num\_destinations\_rival} & float & Average network size of rival carriers (destinations). Leave-one-out mean \\
+\texttt{average\_num\_markets\_rival} & float & Average network size of rival carriers (markets). Leave-one-out mean \\
+
+\bottomrule
+\end{longtable}
+
+\section{Data Quality and Usage Notes}
+
+\subsection{Missing Data}
+\begin{itemize}
+\item Population data: $\sim$1.25\% missing (primarily small airports/MSAs)
+\item Core variables: 99\%+ coverage for passengers, fares, distance
+\item Complete temporal coverage: All quarters 2005--2019
+\end{itemize}
+
+% \subsection{Recommended Usage}
+% \begin{itemize}
+% \item Use \texttt{pop\_o\_d\_geo\_mean} as primary market size measure
+% \item Include quarter-year fixed effects for time trends
+% \item Cluster standard errors by market (origin-destination) or time
+% \item Market shares can be constructed using alternative population scalings
+% \end{itemize}
+
+\section{File Dependencies}
+
+\begin{itemize}
+\item \textbf{Source Data}: DB1B Market quarterly files (2005Q1-2019Q4)
+\item \textbf{Auxiliary Data}: Airport characteristics, demographics, vacation destinations
+\item \textbf{Crosswalk}: \texttt{crosswalk\_airlines\_code.csv} maps carrier codes to airline names
+\item \textbf{Processing Code}: \texttt{processing\_data.do} contains full data construction methodology
+\end{itemize}
+
+\section{Citation}
+
+When using this dataset, please cite:
+\begin{itemize}
+\item U.S. Department of Transportation, Bureau of Transportation Statistics, Airline Origin and Destination Survey (DB1B)
+\item Data processing and construction methodology from this class
+\end{itemize}
+
+\vspace{0.5in}
+\hrule
+\vspace{0.2in}
+\footnotesize
+\textit{Last updated: September 2025} \\
+\textit{For questions about variable construction or methodology, contact professors. }
+
+\end{document}
