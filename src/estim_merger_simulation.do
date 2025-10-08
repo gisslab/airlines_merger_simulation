@@ -14,30 +14,29 @@
 *global mainpath "/Users/kkang57/Dropbox/Teaching/MS-IO/final_project"
 clear
 
-// cd "/Users/gisellelab/Work/airlines_merger_simulation"   // <-- adjust this, then run the do-file , My path is 
+cd "/Users/gisellelab/Work/airlines_merger_simulation"   // <-- adjust this, then run the do-file , My path is 
 
-// global PROC_DATA    "./data/processed/combined/"                // processed data
-// global CODE_DIR      "./src/"                         
-// global OUT      "./src/output/"              // output folder          // source code directory
+global PROC_DATA    "./data/processed/combined/"                // processed data
+global CODE_DIR      "./src/"                         
+global OUT      "./src/output/"              // output folder          // source code directory
 
-// cap log using "${CODE_DIR}/logs/prelim_analysis_merger.log", replace
+cap log using "${CODE_DIR}/logs/prelim_analysis_merger.log", replace
 
-// use "$mainpath/data/airline_data_main.dta"
-// use "$PROC_DATA/airline_data_main.dta", clear
+use "$PROC_DATA/airline_data_main.dta", clear
 
 // global mainpath "/Users/karamkang/Library/CloudStorage/Dropbox/Teaching/MS-IO/final_project"
 // log using "$mainpath/analysis/prelim_analysis.log", replace
 
-use "$mainpath/data/airline_data_main.dta", clear
+// use "$mainpath/data/airline_data_main.dta", clear
 *---------------------------
 * 1. preparing the data
 *---------------------------
 
 // * Checking that legacy and lcc carriers have no overlap
-preserve
-bys carrier: keep if _n==1
-list carrier legacy lcc if !missing(legacy) | !missing(lcc)
-restore
+// preserve
+// bys carrier: keep if _n==1
+// list carrier legacy lcc if !missing(legacy) | !missing(lcc)
+// restore
 
 * focus on a 5% sub-sample of the data (for computational purposes)
 //! this way of randomizing is creating bias towards smaller markets (less observations per market)
@@ -49,8 +48,9 @@ restore
 
 // * new addition: sample 15% of markets, sample one market at a time
 preserve
+set seed 12345
 bys market_code: keep if _n == 1  // Keep one obs per market
-sample 15                          // Sample 15% of markets
+sample 25                          // Sample 15% of markets
 keep market_code                  // Keep only market identifier
 tempfile sampled_markets
 save `sampled_markets'
@@ -69,9 +69,19 @@ gen mean_pop = (origin_pop + dest_pop)/2 	// average
 gen max_pop = max(origin_pop, dest_pop)		// maximum
 
 * declare market size
-gen msize = pop_o_d_geo_mean/10
+gen msize = pop_o_d_geo_mean/20 //  * new addition : scaling down market size to avoid numerical issues
 gen mshare = total_passengers/msize
-sum mshare
+egen mshare_inside = sum(mshare), by(marketid)
+sum mshare mshare_inside
+
+
+// * new addition: Filter out extremely small market shares that cause numerical issues
+scalar min_share_threshold = 10^-5  // 0.01% minimum share
+keep if mshare >= min_share_threshold
+keep if mshare_inside <= 0.995  // Also filter implausibly large shares
+
+// * new addition: eliminate singleton markets after share filtering
+bys marketid: keep if _N > 1
 
 * nesting groups: alternatives
 gen inside = 1
@@ -97,14 +107,7 @@ replace rival_carriers_nest = rival_carriers_nest-1 // number of rivals within t
 
 // * new addition: create additional IV for upper level nesting (rival carriers in market)
 * declare instruments for price and market share
-local inst "average_distance_rival average_num_destinations_rival rival_carriers_nest rival_carriers"
-
-// * new addition: filter small market shares to avoid numerical issues (BEFORE mergersim init)
-scalar min_share_filter = 10^-7
-keep if mshare > min_share_filter
-
-// * new addition: eliminate singleton markets after share filtering
-bys marketid: keep if _N > 1
+local inst "average_distance_rival average_num_destinations_rival rival_carriers_nest rival_carriers" // rival_carriers
 
 * set the panel data: product x markets
 xtset firmid marketid
@@ -115,11 +118,13 @@ xtset firmid marketid
 
 * step 1: initializing the merger simulation settings
 mergersim init, nests(nest1 nest2) price(average_fare) quantity(total_passengers) marketsize(msize) firm(firmid)
+// mergersim init, nests(nest2) price(average_fare) quantity(total_passengers) marketsize(msize) firm(firmid)
 
-sum M_ls M_lsjh M_lshg // exploring that log nests are the same than in the demand estimation.do -----> YES
+// sum M_ls M_lsjh M_lshg // exploring that log nests are the same than in the demand estimation.do -----> YES
 
 * step 2: nested logit demand model estimation
-ivreghdfe M_ls (average_fare M_lsjh M_lshg = `inst') `x_exog', absorb(marketid2) cluster(marketid2)
+ivreghdfe M_ls (average_fare M_lshg M_lsjh = `inst') `x_exog', absorb(marketid2) cluster(marketid2)
+// ivreghdfe M_ls (average_fare M_lsjg = `inst') `x_exog', absorb(marketid2) cluster(marketid2)
 
 * step 3: analyzing premerger market conditions
 mergersim market if year == 2013
