@@ -93,6 +93,8 @@ foreach v of varlist * {
     }
 }
 rename airport airport_id
+destring airport_id, replace
+destring slot_controlled, replace
 tempfile slots
 save `slots'
 
@@ -138,7 +140,9 @@ foreach v of varlist * {
 drop description airport
 // Prefix all non-code columns with "hub_"
 unab allvars : *
-local rest : list allvars - code
+local rest : list allvars - code 
+
+
 foreach v of local rest {
     capture confirm variable `v'
     if !_rc rename `v' hub_`v'
@@ -151,6 +155,8 @@ qui reshape long hub_, i(airport_code) j(carrier) string
 rename airport_code airport_id
 rename hub_ hub
 replace hub = 0 if missing(hub)
+// Convert carrier codes back to uppercase to match DB1B data
+replace carrier = upper(carrier)
 tempfile hubs_long
 save `hubs_long'
 
@@ -207,9 +213,9 @@ di as yellow "------------------------------------ Processing DB1B Market data -
             use `current', clear
             di as yellow "    ---------  Filtering CONUS airports ---------"
 
-            merge m:1 originairportid using `conus_origin', keep(match master) nogenerate
+            merge m:1 originairportid using `conus_origin', keep(match) nogenerate
 
-            merge m:1 destairportid using `conus_dest', keep(match master) nogenerate
+            merge m:1 destairportid using `conus_dest', keep(match) nogenerate
             
             // Market passengers per O-D (quarter)
             bysort origincitymarketid destcitymarketid: egen double market_passengers = total(passengers)
@@ -235,6 +241,7 @@ di as yellow "------------------------------------ Processing DB1B Market data -
             rename slot_controlled destination_slot_controlled
             replace destination_slot_controlled = 0 if missing(destination_slot_controlled)
 
+            tab origin_slot_controlled destination_slot_controlled // checking not all zeros
             drop airport_id
 
             // ---------------- Merge destination vacation flag ---------------
@@ -280,6 +287,8 @@ di as yellow "------------------------------------ Processing DB1B Market data -
             replace destination_hub = 0 if missing(destination_hub)
             drop airport_id
 
+            tab origin_hub destination_hub // checking not all zeros
+
             // ---------------- Aggregate to (O-D-carrier-quarter) ------------
             di as yellow "    ---------  Aggregating to (O-D-carrier-quarter) ---------"
             
@@ -315,6 +324,8 @@ di as yellow "------------------------------------ Processing DB1B Market data -
             gen double average_nonstop_miles = weighted_nonstop_miles / total_passengers
             gen double average_fare = weighted_fare / total_passengers
             gen double average_extra_miles = average_distance - average_nonstop_miles
+
+            sum origin_hub destination_hub origin_slot_controlled destination_slot_controlled // checking not all zeros
             
             // Clean up temporary variables
             drop weighted_distance weighted_nonstop_miles weighted_fare
