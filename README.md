@@ -17,7 +17,7 @@ This project estimates demand and simulates the merger process between airlines.
 1. Run data downloads .py files, see instructions (Run: download_db1b.py)
 2. Preprocess downloaded data: processing_data.do
 3. Demand estimation: demand_estimation.do
-4. Merger simulation → TODO
+4. Merger simulation 
 
 ## REQUIREMENTS:
 - Python 3.x
